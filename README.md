@@ -18,7 +18,7 @@ With [`jmon/algo`](https://github.com/jmonlabs/algo) or
 [`jmon/live`](https://github.com/jmonlabs/live), pass it alongside Tone:
 
 ```js
-jm.play(composition, { Tone, sound });
+jm.play(piece, { Tone, sound });
 ```
 
 ```js

@@ -8,7 +8,7 @@
  *     import sound from "https://cdn.jsdelivr.net/gh/jmonlabs/sound@main/src/index.js";
  *     import * as Tone from "npm:tone";
  *
- *     jm.play(composition, { Tone, sound });
+ *     jm.play(piece, { Tone, sound });
  *
  * Without it, `jm.play` still works — a track asking for a General MIDI
  * program falls back to a synth. What this adds is the sampled instrument and
@@ -221,7 +221,7 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
 }
 
 /**
- * The provider object `jm.play(composition, { Tone, sound })` expects.
+ * The provider object `jm.play(piece, { Tone, sound })` expects.
  *
  * Every method is optional from the caller's side, so a partial or custom
  * implementation — an adapter over a different sample engine, say — is a
