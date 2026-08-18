@@ -27,6 +27,9 @@ jm.play(piece, { Tone, sound });
 { label: "Drums",  synth: "drumkit:acoustic", notes }         // a drum kit
 ```
 
+Or through [`jmon/studio`](https://github.com/jmonlabs/studio), which
+assembles all four packages and passes this one along on every call.
+
 Standalone, with no JMON involved:
 
 ```js
