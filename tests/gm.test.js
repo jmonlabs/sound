@@ -356,3 +356,44 @@ test("the probe asks for a file in the configured spelling", async () => {
     }
   });
 });
+
+/* --- arbitrary sample sets ------------------------------------------------ */
+
+test("a registered kit is one file per key, drums or not", async () => {
+  const { registerDrumKit, create, readSpec } = await import("../src/index.js");
+  const Tone = { Sampler: class { constructor(o) { Object.assign(this, o); } } };
+
+  // The registry maps MIDI note to filename, which is the shape any one-shot
+  // set wants: spoken phrases, field recordings, samples of anything.
+  registerDrumKit("poem", {
+    baseUrl: "https://example.test/poem/",
+    samples: { 60: "line1.mp3", 62: "line2.mp3", 64: "line3.mp3" },
+  });
+
+  assert.equal(readSpec("drumkit:poem").kind, "drumkit");
+  const built = create("drumkit:poem", Tone);
+  assert.equal(built.node.baseUrl, "https://example.test/poem/");
+  assert.deepEqual(built.node.urls, {
+    C4: "line1.mp3", D4: "line2.mp3", E4: "line3.mp3",
+  });
+});
+
+test("the object form of a kit carries options the string form cannot", async () => {
+  const { registerDrumKit, create } = await import("../src/index.js");
+  const Tone = { Sampler: class { constructor(o) { Object.assign(this, o); } } };
+  registerDrumKit("spoken", {
+    baseUrl: "https://example.test/spoken/",
+    samples: { 60: "a.mp3" },
+  });
+
+  const built = create({ kit: "spoken", options: { release: 0 } }, Tone);
+  assert.deepEqual(built.node.urls, { C4: "a.mp3" });
+  assert.equal(built.node.release, 0, "so a one-shot can cut cleanly");
+});
+
+test("an unregistered kit is declined, not guessed at", async () => {
+  const { create } = await import("../src/index.js");
+  const Tone = { Sampler: class {} };
+  assert.equal(create("drumkit:nothing-here", Tone), null);
+  assert.equal(create({ kit: "nothing-here" }, Tone), null);
+});

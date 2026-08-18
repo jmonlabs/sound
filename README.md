@@ -24,7 +24,7 @@ jm.play(composition, { Tone, sound });
 ```js
 { label: "Violin", synth: 40, notes }                        // GM program 0-127
 { label: "Violin", synth: { gm: 40, strategy: "complete" } } // sampling density
-{ label: "Drums",  synth: "kit:808", notes }                 // a drum kit
+{ label: "Drums",  synth: "drumkit:acoustic", notes }         // a drum kit
 ```
 
 Standalone, with no JMON involved:
@@ -91,6 +91,40 @@ the 126 others come from `GM_INSTRUMENTS`, which is exported and can be
 edited. For samples that share nothing with this layout, skip the GM path
 entirely and hand Tone the URLs yourself:
 `synth: { type: "Sampler", options: { baseUrl, urls } }`.
+
+## Your own samples
+
+The kit registry maps a MIDI note to a file. Drums are the obvious use, but
+nothing about it is percussive: one file per key is also how you play spoken
+phrases, field recordings, or any other one-shot set.
+
+```js
+sound.registerDrumKit("poem", {
+  baseUrl: "https://example.test/poem/",
+  samples: { 60: "line1.mp3", 62: "line2.mp3", 64: "line3.mp3" },
+});
+
+{ label: "Voice", synth: "drumkit:poem", notes: [
+  { pitch: 60, duration: 4, time: 0 },
+  { pitch: 62, duration: 4, time: 4 },
+]}
+
+// The object form, when you need options the string form has no room for.
+{ label: "Voice", synth: { kit: "poem", loopSustain: false, options: { release: 0 } } }
+```
+
+Two things to know before mapping speech onto keys.
+
+`Sampler` **transposes** any note you did not map, to the nearest one you did.
+That is what makes a violin playable from 25 files; on a spoken phrase it is a
+chipmunk. Play only the pitches you mapped.
+
+A note longer than its file would normally be **held by looping** the sample.
+That is right for a string and wrong for a sentence, and the detection is
+acoustic rather than semantic, so a phrase ending on an open vowel can be
+looped. `loopSustain: false` settles it.
+
+Shipped kits: `acoustic`, `r8`. `drumKits` is the registry, mutable.
 
 ## Sampling density
 

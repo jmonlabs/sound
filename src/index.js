@@ -89,6 +89,15 @@ export function readSpec(spec) {
   }
 
   if (spec && typeof spec === "object") {
+    // `{ kit: "name" }` is the object form of `"drumkit:name"`, so a sample
+    // set can carry options the string form has no room for. Any registered
+    // kit works, not only drums: one file per key is also how you play a set
+    // of spoken phrases, field recordings, or anything else one-shot.
+    const kitName = spec.kit ?? spec.drumkit;
+    if (typeof kitName === "string") {
+      return { kind: "drumkit", ...parseDrumKitSpec(`drumkit:${kitName}`), options: spec.options };
+    }
+
     const program = typeof spec.gm === "number"
       ? spec.gm
       : (typeof spec.program === "number" ? spec.program : null);
@@ -155,7 +164,7 @@ export function create(spec, Tone) {
     urls[midiToNoteName(parseInt(midi, 10))] = file;
   }
   return {
-    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl }),
+    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl, ...(asked.options || {}) }),
     isLoadable: true,
   };
 }
