@@ -23,6 +23,8 @@
  */
 
 import {
+  BANKS,
+  CDN_ROOTS,
   CDN_SOURCES,
   GM_INSTRUMENTS,
   GM_SAMPLE_SECONDS,
@@ -31,9 +33,11 @@ import {
   generateCompleteSamplerUrls,
   generateSamplerUrls,
   getPopularInstruments,
+  getSoundfontBank,
   getSoundfontBase,
   gmMaxBeats,
   resolveSoundfontBase,
+  setSoundfontBank,
   setSoundfontBase,
 } from "./gm.js";
 
@@ -90,12 +94,27 @@ export function readSpec(spec) {
       program,
       strategy: spec.strategy,
       noteRange: spec.noteRange,
-      baseUrl: spec.baseUrl,
+      // A per-track bank resolves to a base URL here, so nothing downstream
+      // has to know banks exist. An explicit baseUrl still wins.
+      baseUrl: spec.baseUrl || (spec.bank ? bankBase(spec.bank) : undefined),
       options: spec.options,
     };
   }
 
   return null;
+}
+
+/**
+ * The base URL for a named bank, on the source currently in use — so a
+ * per-track bank follows whichever CDN answered the probe.
+ */
+function bankBase(bank) {
+  if (!BANKS.includes(bank)) {
+    console.warn(`Unknown sample bank "${bank}". Using ${getSoundfontBank()}.`);
+    return undefined;
+  }
+  const root = CDN_ROOTS.find((r) => getSoundfontBase().startsWith(r)) || CDN_ROOTS[0];
+  return `${root}/${bank}`;
 }
 
 /**
@@ -207,6 +226,8 @@ export const sound = {
 
   // General MIDI.
   GM_INSTRUMENTS,
+  BANKS,
+  CDN_ROOTS,
   CDN_SOURCES,
   generateSamplerUrls,
   generateCompleteSamplerUrls,
@@ -216,6 +237,8 @@ export const sound = {
   getSoundfontBase,
   setSoundfontBase,
   resolveSoundfontBase,
+  getSoundfontBank,
+  setSoundfontBank,
 
   // Every sample in the FluidR3 set is a fixed-length render; these say how
   // long, and how many beats that buys at a given tempo.
@@ -236,7 +259,9 @@ export const sound = {
 export {
   analyseSustain,
   applyPitchAnchorsToSampler,
+  BANKS,
   canResample,
+  CDN_ROOTS,
   CDN_SOURCES,
   createGMInstrumentNode,
   drumKits,
@@ -245,6 +270,7 @@ export {
   generateSamplerUrls,
   getDrumKit,
   getPopularInstruments,
+  getSoundfontBank,
   getSoundfontBase,
   GM_INSTRUMENTS,
   GM_SAMPLE_SECONDS,
@@ -253,6 +279,7 @@ export {
   prepareLoopRegion,
   registerDrumKit,
   resolveSoundfontBase,
+  setSoundfontBank,
   setSoundfontBase,
   sustainSampledNote,
 };

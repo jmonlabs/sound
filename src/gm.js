@@ -143,15 +143,39 @@ export const GM_INSTRUMENTS = {
 };
 
 /**
- * CDN sources for the FluidR3 samples, in preference order.
+ * The sample banks the midi-js soundfont set publishes, all three rendered by
+ * the same process and laid out identically — same folder names, same 128
+ * programs, same fixed sample length. They differ in the recordings.
+ *
+ * Measured tail level, as a fraction of each recording's peak — which is what
+ * decides whether a note can be held by looping (see `analyseSustain`):
+ *
+ *     strings   FluidR3 103%   Musyng 81%   FatBoy 41%
+ *     violin            93%           98%          43%
+ *     organ             91%           87%          76%
+ *     piano              4%            7%           4%
+ *
+ * FatBoy's sustained instruments fade noticeably inside the sample, so they
+ * loop less convincingly. FluidR3 is the default because it is the most
+ * even; MusyngKite is generally the better-sounding set.
+ */
+export const BANKS = ["FluidR3_GM", "MusyngKite", "FatBoy"];
+
+/** Where the banks are served from, in preference order. */
+export const CDN_ROOTS = [
+  "https://raw.githubusercontent.com/jmonlabs/midi-js-soundfonts/gh-pages",
+  "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages",
+];
+
+let activeBank = BANKS[0];
+
+/**
+ * CDN sources for the current bank, in preference order.
  * raw.githubusercontent.com is more reliable for parallel audio file loading;
  * jsDelivr is the fallback. See {@link resolveSoundfontBase}, which picks
  * between them at runtime rather than trusting the first one to be up.
  */
-export const CDN_SOURCES = [
-  "https://raw.githubusercontent.com/jmonlabs/midi-js-soundfonts/gh-pages/FluidR3_GM",
-  "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM",
-];
+export const CDN_SOURCES = CDN_ROOTS.map((root) => `${root}/${BANKS[0]}`);
 
 /** The source currently in use. Changed only by resolveSoundfontBase/setSoundfontBase. */
 let activeBase = CDN_SOURCES[0];
@@ -163,11 +187,36 @@ export function getSoundfontBase() {
 
 /**
  * Force a base URL — your own mirror, or a local copy of the sample set.
- * Passing `null` restores the default and re-enables probing.
+ * Passing `null` restores the default bank and re-enables probing.
  */
 export function setSoundfontBase(url) {
-  activeBase = url || CDN_SOURCES[0];
+  activeBase = url || `${CDN_ROOTS[0]}/${activeBank}`;
   pendingProbe = url ? Promise.resolve(activeBase) : null;
+}
+
+/** Which bank is in use. */
+export function getSoundfontBank() {
+  return activeBank;
+}
+
+/**
+ * Choose a sample bank. The layout is identical across all three, so this is
+ * only a change of recording — nothing downstream has to know.
+ *
+ * Re-arms the CDN probe, so the next `resolveSoundfontBase()` checks the new
+ * bank rather than trusting a source that answered for the old one.
+ *
+ * @param {string} bank - One of {@link BANKS}
+ * @returns {string} The base URL now in use
+ */
+export function setSoundfontBank(bank) {
+  if (!BANKS.includes(bank)) {
+    throw new Error(`Unknown sample bank "${bank}". Choose one of: ${BANKS.join(", ")}.`);
+  }
+  activeBank = bank;
+  activeBase = `${CDN_ROOTS[0]}/${bank}`;
+  pendingProbe = null;
+  return activeBase;
 }
 
 let pendingProbe = null;
@@ -192,7 +241,7 @@ let pendingProbe = null;
 export function resolveSoundfontBase(options = {}) {
   if (pendingProbe) return pendingProbe;
 
-  const { sources = CDN_SOURCES, fetchImpl = globalThis.fetch } = options;
+  const { sources = CDN_ROOTS.map((root) => `${root}/${activeBank}`), fetchImpl = globalThis.fetch } = options;
   const probePath = `${GM_INSTRUMENTS[0].folder}/C4.mp3`;
 
   pendingProbe = (async () => {

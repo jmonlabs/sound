@@ -69,13 +69,41 @@ The default used to be `complete`, which meant a four-instrument piece fetched
 352 files before its first note. `balanced` resamples up to ±2 semitones, which
 shifts formants — audible on voice, strings and brass, inaudible on percussion.
 
-### Where samples come from
+### Which samples, and from where
 
-FluidR3, from a CDN chosen once per session by asking each source in order.
+The [midi-js soundfont set](https://github.com/gleitz/midi-js-soundfonts)
+publishes three banks. All three are rendered by the same process and laid out
+identically — same folder names, same 128 programs, same fixed sample length —
+so switching is only a change of recording.
+
+```js
+sound.setSoundfontBank("MusyngKite");                 // for the whole piece
+{ label: "Cello", synth: { gm: 42, bank: "FatBoy" } } // or per track
+```
+
+Their measured tail level, as a fraction of each recording's peak — which is
+what decides whether a note can be held by looping:
+
+| | FluidR3_GM | MusyngKite | FatBoy |
+|---|---|---|---|
+| strings | 103% | 81% | 41% |
+| violin | 93% | 98% | 43% |
+| organ | 91% | 87% | 76% |
+| piano | 4% | 7% | 4% |
+
+FatBoy's sustained instruments fade noticeably inside the sample, so they loop
+less convincingly. **FluidR3_GM** is the default because it is the most even;
+MusyngKite is generally reckoned the better-sounding set, and is worth trying
+first if something sounds thin.
+
+Whichever bank, the CDN is chosen once per session by asking each source in
+order — switching bank re-arms that, since a source answering for one says
+nothing about another.
 
 ```js
 sound.setSoundfontBase("https://my-mirror.example/FluidR3_GM");  // pin it
 sound.getSoundfontBase();                                        // what is in use
+sound.getSoundfontBank();                                        // which bank
 ```
 
 ## What it does to a sounding note
@@ -165,7 +193,7 @@ back to a synth; no `bendVoices` and a glissando moves to a glide voice; no
 node --test tests/*.test.js
 ```
 
-21 assertion-backed tests, no dependencies and no network — the CDN probe
+26 assertion-backed tests, no dependencies and no network — the CDN probe
 takes an injected fetch.
 
 ## License

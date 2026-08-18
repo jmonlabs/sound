@@ -224,3 +224,64 @@ test("gmMaxBeats converts the sample length into quarter notes", async () => {
   assert.equal(gmMaxBeats(), gmMaxBeats(120), "120 is the default tempo");
   assert.equal(gmMaxBeats(0), gmMaxBeats(120), "a nonsense tempo falls back");
 });
+
+/* --- sample banks --------------------------------------------------------- */
+
+test("three banks, laid out identically", async () => {
+  const { BANKS, CDN_ROOTS } = await import("../src/gm.js");
+
+  // Same folder names, same 128 programs, same fixed sample length — they
+  // differ only in the recordings, which is what makes the switch cheap.
+  assert.deepEqual(BANKS, ["FluidR3_GM", "MusyngKite", "FatBoy"]);
+  assert.ok(CDN_ROOTS.length >= 2, "and each is served from more than one place");
+});
+
+test("switching bank changes where samples come from", async () => {
+  const { setSoundfontBank, getSoundfontBank } = await import("../src/gm.js");
+  try {
+    assert.equal(getSoundfontBank(), "FluidR3_GM", "the default is the most even set");
+
+    setSoundfontBank("MusyngKite");
+    assert.equal(getSoundfontBank(), "MusyngKite");
+    assert.match(Object.values(generateSamplerUrls(40))[0], /\/MusyngKite\/violin-mp3\//);
+  } finally {
+    setSoundfontBank("FluidR3_GM");
+    setSoundfontBase(null);
+  }
+});
+
+test("an unknown bank is refused rather than 404ing later", async () => {
+  const { setSoundfontBank } = await import("../src/gm.js");
+  assert.throws(() => setSoundfontBank("Symphony"), /Unknown sample bank/);
+});
+
+test("switching bank re-arms the CDN probe", async () => {
+  // A source that answered for one bank says nothing about another, so the
+  // memoised result has to be dropped.
+  const { setSoundfontBank } = await import("../src/gm.js");
+  await withBase(async () => {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return { ok: true }; };
+
+    await resolveSoundfontBase({ fetchImpl });
+    assert.equal(calls, 1);
+
+    setSoundfontBank("FatBoy");
+    await resolveSoundfontBase({ fetchImpl });
+    assert.equal(calls, 2, "the new bank is probed on its own");
+
+    setSoundfontBank("FluidR3_GM");
+  });
+});
+
+test("a track can name its own bank", async () => {
+  const { readSpec } = await import("../src/index.js");
+
+  assert.match(readSpec({ gm: 40, bank: "MusyngKite" }).baseUrl, /\/MusyngKite$/);
+  assert.equal(readSpec({ gm: 40 }).baseUrl, undefined, "and none means the active one");
+  assert.equal(
+    readSpec({ gm: 40, bank: "FatBoy", baseUrl: "https://mine/x" }).baseUrl,
+    "https://mine/x",
+    "an explicit baseUrl still wins",
+  );
+});
