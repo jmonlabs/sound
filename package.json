@@ -1,0 +1,36 @@
+{
+  "name": "@jmon/sound",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sampled instruments for jmon/algo: General MIDI, drum kits, and the voice handling a soundfont engine does. Distributed as ESM source via jsDelivr from GitHub — no build, no npm publish.",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "author": "JMON Labs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmonlabs/sound.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jmonlabs/sound/issues"
+  },
+  "homepage": "https://github.com/jmonlabs/sound#readme",
+  "keywords": [
+    "music",
+    "general-midi",
+    "soundfont",
+    "sampler",
+    "fluidr3",
+    "drum-kits",
+    "jmon",
+    "tone.js",
+    "web-audio"
+  ],
+  "peerDependencies": {
+    "tone": "^14.8.49"
+  },
+  "peerDependenciesMeta": {
+    "tone": {
+      "optional": true
+    }
+  }
+}
