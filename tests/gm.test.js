@@ -285,3 +285,74 @@ test("a track can name its own bank", async () => {
     "an explicit baseUrl still wins",
   );
 });
+
+/* --- pointing somewhere else ---------------------------------------------- */
+
+test("setSoundfontSources changes the hosts, keeping the bank layout", async () => {
+  const { setSoundfontSources, getSoundfontSources } = await import("../src/gm.js");
+  try {
+    setSoundfontSources("https://mirror.test/sf");
+
+    assert.deepEqual(getSoundfontSources(), ["https://mirror.test/sf"]);
+    assert.match(
+      Object.values(generateSamplerUrls(40))[0],
+      /^https:\/\/mirror\.test\/sf\/FluidR3_GM\/violin-mp3\//,
+      "the bank name is still appended",
+    );
+  } finally {
+    setSoundfontSources(null);
+  }
+});
+
+test("setSoundfontSources(null) restores the defaults", async () => {
+  const { setSoundfontSources, getSoundfontSources, CDN_ROOTS } = await import("../src/gm.js");
+  setSoundfontSources(["https://a.test", "https://b.test"]);
+  assert.equal(getSoundfontSources().length, 2);
+
+  setSoundfontSources(null);
+  assert.deepEqual(getSoundfontSources(), CDN_ROOTS);
+});
+
+test("setSoundfontFormat respells both the folder and the extension", async () => {
+  const { setSoundfontFormat } = await import("../src/gm.js");
+  try {
+    // midi-js puts the format in both: violin-mp3/C4.mp3
+    setSoundfontFormat("ogg");
+    assert.match(Object.values(generateSamplerUrls(40))[0], /\/violin-ogg\/[A-G][#b]?\d\.ogg$/);
+  } finally {
+    setSoundfontFormat(null);
+  }
+});
+
+test("a flat layout is expressible, for samples that are not midi-js", async () => {
+  const { setSoundfontFormat } = await import("../src/gm.js");
+  try {
+    setSoundfontFormat({ folderSuffix: "", extension: "wav" });
+    assert.match(Object.values(generateSamplerUrls(40))[0], /\/violin\/[A-G][#b]?\d\.wav$/);
+
+    setSoundfontFormat({ extension: ".flac" });
+    assert.match(
+      Object.values(generateSamplerUrls(40))[0], /\/violin\/[A-G][#b]?\d\.flac$/,
+      "a leading dot on the extension is tolerated, and folderSuffix is kept",
+    );
+  } finally {
+    setSoundfontFormat(null);
+    assert.match(Object.values(generateSamplerUrls(40))[0], /\/violin-mp3\/[A-G][#b]?\d\.mp3$/);
+  }
+});
+
+test("the probe asks for a file in the configured spelling", async () => {
+  // Probing for an .mp3 on a host that only serves .ogg would reject a source
+  // that actually works.
+  const { setSoundfontFormat } = await import("../src/gm.js");
+  await withBase(async () => {
+    const asked = [];
+    setSoundfontFormat("ogg");
+    try {
+      await resolveSoundfontBase({ fetchImpl: async (url) => { asked.push(url); return { ok: true }; } });
+      assert.match(asked[0], /\.ogg$/, `probed ${asked[0]}`);
+    } finally {
+      setSoundfontFormat(null);
+    }
+  });
+});

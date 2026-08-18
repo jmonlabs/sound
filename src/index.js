@@ -35,10 +35,14 @@ import {
   getPopularInstruments,
   getSoundfontBank,
   getSoundfontBase,
+  getSoundfontFormat,
+  getSoundfontSources,
   gmMaxBeats,
   resolveSoundfontBase,
   setSoundfontBank,
   setSoundfontBase,
+  setSoundfontFormat,
+  setSoundfontSources,
 } from "./gm.js";
 
 import {
@@ -239,6 +243,10 @@ export const sound = {
   resolveSoundfontBase,
   getSoundfontBank,
   setSoundfontBank,
+  getSoundfontSources,
+  setSoundfontSources,
+  getSoundfontFormat,
+  setSoundfontFormat,
 
   // Every sample in the FluidR3 set is a fixed-length render; these say how
   // long, and how many beats that buys at a given tempo.
@@ -272,6 +280,8 @@ export {
   getPopularInstruments,
   getSoundfontBank,
   getSoundfontBase,
+  getSoundfontFormat,
+  getSoundfontSources,
   GM_INSTRUMENTS,
   GM_SAMPLE_SECONDS,
   gmMaxBeats,
@@ -281,6 +291,8 @@ export {
   resolveSoundfontBase,
   setSoundfontBank,
   setSoundfontBase,
+  setSoundfontFormat,
+  setSoundfontSources,
   sustainSampledNote,
 };
 

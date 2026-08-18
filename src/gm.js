@@ -161,13 +161,76 @@ export const GM_INSTRUMENTS = {
  */
 export const BANKS = ["FluidR3_GM", "MusyngKite", "FatBoy"];
 
-/** Where the banks are served from, in preference order. */
+/** Default hosts for the banks, in preference order. */
 export const CDN_ROOTS = [
   "https://raw.githubusercontent.com/jmonlabs/midi-js-soundfonts/gh-pages",
   "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages",
 ];
 
 let activeBank = BANKS[0];
+let roots = [...CDN_ROOTS];
+
+/** The hosts currently probed, in order. */
+export function getSoundfontSources() {
+  return [...roots];
+}
+
+/**
+ * Replace the hosts to try. For serving the same bank layout from somewhere
+ * else: your own mirror, a local copy, a different CDN. The bank name is
+ * still appended, so a source must contain `FluidR3_GM/` and friends.
+ *
+ * To point at a single flat folder instead, use `setSoundfontBase`, which
+ * skips both the bank path and the probe.
+ *
+ * @param {string|Array<string>} urls - Passing null restores the defaults
+ * @returns {Array<string>} The list now in use
+ */
+export function setSoundfontSources(urls) {
+  const list = (urls == null ? [] : [].concat(urls)).filter(Boolean);
+  roots = list.length ? list : [...CDN_ROOTS];
+  activeBase = `${roots[0]}/${activeBank}`;
+  pendingProbe = null;
+  return getSoundfontSources();
+}
+
+/**
+ * How a sample's path is spelled. The midi-js layout puts the format in both
+ * the folder and the extension: `violin-mp3/C4.mp3`.
+ */
+let format = { folderSuffix: "-mp3", extension: "mp3" };
+
+/** The path spelling currently in use. */
+export function getSoundfontFormat() {
+  return { ...format };
+}
+
+/**
+ * Change how sample paths are spelled, for a set that is not laid out the way
+ * the midi-js banks are.
+ *
+ *     setSoundfontFormat("ogg");                              violin-ogg/C4.ogg
+ *     setSoundfontFormat({ folderSuffix: "", extension: "wav" });  violin/C4.wav
+ *
+ * @param {string|Object} spec - A format name, or the two parts separately.
+ *   Passing null restores `-mp3` / `mp3`.
+ * @returns {Object} The spelling now in use
+ */
+export function setSoundfontFormat(spec) {
+  if (spec == null) {
+    format = { folderSuffix: "-mp3", extension: "mp3" };
+  } else if (typeof spec === "string") {
+    const name = spec.replace(/^[.-]/, "");
+    format = { folderSuffix: `-${name}`, extension: name };
+  } else {
+    format = {
+      folderSuffix: spec.folderSuffix ?? format.folderSuffix,
+      extension: (spec.extension ?? format.extension).replace(/^\./, ""),
+    };
+  }
+  pendingProbe = null;   // the probe fetches a sample, so it has to re-run
+  return getSoundfontFormat();
+}
 
 /**
  * CDN sources for the current bank, in preference order.
@@ -190,7 +253,7 @@ export function getSoundfontBase() {
  * Passing `null` restores the default bank and re-enables probing.
  */
 export function setSoundfontBase(url) {
-  activeBase = url || `${CDN_ROOTS[0]}/${activeBank}`;
+  activeBase = url || `${roots[0]}/${activeBank}`;
   pendingProbe = url ? Promise.resolve(activeBase) : null;
 }
 
@@ -214,7 +277,7 @@ export function setSoundfontBank(bank) {
     throw new Error(`Unknown sample bank "${bank}". Choose one of: ${BANKS.join(", ")}.`);
   }
   activeBank = bank;
-  activeBase = `${CDN_ROOTS[0]}/${bank}`;
+  activeBase = `${roots[0]}/${bank}`;
   pendingProbe = null;
   return activeBase;
 }
@@ -241,8 +304,8 @@ let pendingProbe = null;
 export function resolveSoundfontBase(options = {}) {
   if (pendingProbe) return pendingProbe;
 
-  const { sources = CDN_ROOTS.map((root) => `${root}/${activeBank}`), fetchImpl = globalThis.fetch } = options;
-  const probePath = `${GM_INSTRUMENTS[0].folder}/C4.mp3`;
+  const { sources = roots.map((root) => `${root}/${activeBank}`), fetchImpl = globalThis.fetch } = options;
+  const probePath = samplePath(GM_INSTRUMENTS[0].folder, "C4");
 
   pendingProbe = (async () => {
     if (typeof fetchImpl !== "function") return activeBase;
@@ -363,7 +426,12 @@ export function generateSamplerUrls(
  * on its own, which is why the earlier attempt here did nothing.
  */
 function sampleUrl(folder, noteName, baseUrl) {
-  return `${baseUrl}/${folder}/${noteName}.mp3`;
+  return `${baseUrl}/${samplePath(folder, noteName)}`;
+}
+
+/** The `<folder>/<note>.<ext>` part, respecting the configured spelling. */
+function samplePath(folder, noteName) {
+  return `${folder.replace(/-mp3$/, format.folderSuffix)}/${noteName}.${format.extension}`;
 }
 
 /**
@@ -392,7 +460,7 @@ export function generateCompleteSamplerUrls(
   // Generate all note names and map to URLs
   for (let midi = minNote; midi <= maxNote; midi++) {
     const noteName = midiToNoteName(midi);
-    urls[noteName] = `${baseUrl}/${instrument.folder}/${noteName}.mp3`;
+    urls[noteName] = sampleUrl(instrument.folder, noteName, baseUrl);
   }
 
   return urls;

@@ -62,7 +62,35 @@ whether a note can be held by looping:
 sample, so they loop less well.
 
 The CDN is chosen once per session by trying each source in order.
-`setSoundfontBase(url)` pins your own mirror instead.
+
+## Somewhere else
+
+Four levels, from narrowest to widest.
+
+```js
+// One track, one folder.
+{ label: "Cello", synth: { gm: 42, baseUrl: "https://mine.test/sf/FluidR3_GM" } }
+
+// One flat folder for everything. Skips the bank path and the probe.
+sound.setSoundfontBase("https://mine.test/samples");
+
+// Same bank layout, different hosts. Tried in order, bank name appended.
+sound.setSoundfontSources(["https://mine.test/sf", "https://backup.test/sf"]);
+
+// A different path spelling, for samples not laid out the midi-js way.
+sound.setSoundfontFormat("ogg");                             // violin-ogg/C4.ogg
+sound.setSoundfontFormat({ folderSuffix: "", extension: "wav" }); // violin/C4.wav
+```
+
+Passing `null` to any of the setters restores the default. The probe follows
+the format, so it does not reject a host over a file extension it never
+serves.
+
+What is not configurable is the folder *names*: `violin`, `pad_4_choir`, and
+the 126 others come from `GM_INSTRUMENTS`, which is exported and can be
+edited. For samples that share nothing with this layout, skip the GM path
+entirely and hand Tone the URLs yourself:
+`synth: { type: "Sampler", options: { baseUrl, urls } }`.
 
 ## Sampling density
 
@@ -118,6 +146,8 @@ written pitch.
 Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 `getPopularInstruments`, `BANKS`, `getSoundfontBank`, `setSoundfontBank`,
 `getSoundfontBase`, `setSoundfontBase`, `resolveSoundfontBase`,
+`getSoundfontSources`, `setSoundfontSources`, `getSoundfontFormat`,
+`setSoundfontFormat`,
 `GM_SAMPLE_SECONDS`, `gmMaxBeats`, `drumKits`, `registerDrumKit`,
 `getDrumKit`, `analyseSustain`, `prepareLoopRegion`, `canResample`.
 
@@ -135,7 +165,7 @@ is small enough to write an adapter against.
 node --test tests/*.test.js
 ```
 
-26 tests, no dependencies and no network: the CDN probe takes an injected
+31 tests, no dependencies and no network: the CDN probe takes an injected
 `fetch`.
 
 ## License
