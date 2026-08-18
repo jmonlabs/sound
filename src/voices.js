@@ -213,7 +213,7 @@ export function prepareLoopRegion(buffer, analysis) {
  * Hold a sampled note for as long as it is written, by looping the sample's
  * sustaining region.
  *
- * Every FluidR3 sample is a fixed 3.19-second render, so a longer note used to
+ * Every FluidR3 sample is a fixed 3.13-second render, so a longer note used to
  * run out of sound — a whole note at 60 BPM ended in silence. Tone's
  * `Sampler` schedules each voice to stop at the end of its buffer, but setting
  * `loop` on a started `ToneBufferSource` cancels exactly that stop, which is

@@ -613,15 +613,18 @@ export function getPopularInstruments() {
 /**
  * How long a FluidR3 sample lasts, in seconds.
  *
- * Every file in the set is the same fixed-length render — measured, not
- * assumed: violin C4, violin C6 and piano C4 are all 122 MPEG frames at
- * 44.1 kHz, so 3.19 s each. This is the one place GM playback differs
+ * Every file in the set is the same fixed-length render. Measured on the
+ * decoded audio, not on the container: violin C4, violin C6 and piano C4 all
+ * decode to 137984 samples at 44.1 kHz, so 3.1289 s. (Counting MPEG frames
+ * instead gives 3.19 s, which includes the encoder delay and padding the
+ * decoder strips, and would overstate how long a note can run.) This is the
+ * one place GM playback differs
  * fundamentally from a soundfont engine, which loops a sample's sustain
  * region and can hold a note forever. Here the note simply stops.
  *
  * A whole note at 60 BPM is 4 seconds, so it ends in silence.
  */
-export const GM_SAMPLE_SECONDS = 3.19;
+export const GM_SAMPLE_SECONDS = 3.13;
 
 /**
  * The longest note, in quarter notes, that a GM sample can sustain at a
