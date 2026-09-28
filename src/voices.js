@@ -13,7 +13,9 @@
  *   - **bend**: ramp a voice's playbackRate, so a glissando resamples the
  *     instrument instead of handing the note to a substitute synth;
  *   - **hold**: loop a sample's sustaining region, so a note longer than the
- *     recording does not run out of sound.
+ *     recording does not run out of sound;
+ *   - **shape**: move a voice's loudness through the note, so a held string
+ *     swells and eases off instead of sitting at one level like a tape loop.
  */
 
 /** Analysis is per buffer and never changes, so compute it once. */
@@ -74,6 +76,77 @@ export function applyPitchAnchorsToSampler(synth, midi, startTime, anchors, base
     for (let k = 1; k < anchors.length; k++) {
       rate.linearRampToValueAtTime(base * ratioAt(anchors[k].value), startTime + anchors[k].time);
     }
+    applied = true;
+  }
+  return applied;
+}
+
+/**
+ * Schedule a loudness curve on a Sampler's sounding voices.
+ *
+ * Each voice is a `ToneBufferSource` whose output gain Tone already automates:
+ * a ramp from 0 to the velocity over the Sampler's `attack`, and a ramp to 0
+ * over its `release` once the note is let go. A curve laid on top of that
+ * would be undone by the release, which ramps from the level Tone computed
+ * when it scheduled it — the velocity — so a note that had eased off would
+ * jump back up before fading. The whole gain path is therefore replaced:
+ * from 0, through the anchors, then down to 0 over `release` after the note.
+ *
+ * Call it last. Anything that stops the voice again afterwards (holdVoices,
+ * a triggerRelease) cancels scheduled gain values and would erase the curve.
+ *
+ * @param {Object} synth — a Tone.Sampler
+ * @param {number} midi — the note's MIDI number, which keys `_activeSources`
+ * @param {number} startTime — absolute time in seconds of the note start
+ * @param {Array<{time:number,value:number}>} anchors — time in seconds
+ *   relative to `startTime`, value as a multiple of the note's velocity
+ * @param {Object} options
+ * @param {number} options.seconds — the note's duration in seconds
+ * @param {number} [options.velocity=1] — the level the Sampler started it at
+ * @param {number} [options.attack=0] — shortest time to the first anchor, so a
+ *   curve that starts loud still does not click
+ * @param {number} [options.release=0] — fade after the note, in seconds
+ * @returns {boolean} whether any voice was reached
+ */
+export function applyAmplitudeAnchorsToSampler(synth, midi, startTime, anchors, options = {}) {
+  if (!Array.isArray(anchors) || anchors.length === 0) return false;
+  const sources = synth?._activeSources?.get?.(Math.round(midi));
+  if (!Array.isArray(sources) || sources.length === 0) return false;
+
+  const velocity = options.velocity ?? 1;
+  const seconds = Math.max(0, options.seconds ?? 0);
+  const attack = Math.max(0.005, options.attack ?? 0);
+  const release = Math.max(0.005, options.release ?? 0);
+  const end = startTime + seconds;
+
+  // The level at the note's end, read off the curve (held after its last anchor).
+  const levelAt = (t) => {
+    if (t <= anchors[0].time) return anchors[0].value;
+    for (let k = 1; k < anchors.length; k++) {
+      const a = anchors[k - 1];
+      const b = anchors[k];
+      if (t <= b.time) return a.value + (b.value - a.value) * ((t - a.time) / (b.time - a.time || 1));
+    }
+    return anchors.at(-1).value;
+  };
+
+  let applied = false;
+  for (const source of sources) {
+    const gain = source?._gainNode?.gain;
+    if (!gain || typeof gain.linearRampToValueAtTime !== "function") continue;
+
+    gain.cancelScheduledValues(startTime);
+    gain.setValueAtTime(0, startTime);
+    let last = startTime;
+    anchors.forEach((a, k) => {
+      const at = startTime + Math.max(a.time, k === 0 ? attack : 0);
+      if (at <= last || at >= end) return;   // forward in time, and inside the note
+      gain.linearRampToValueAtTime(velocity * a.value, at);
+      last = at;
+    });
+    // The note's end, at the level the curve has reached there.
+    gain.linearRampToValueAtTime(velocity * levelAt(seconds), end);
+    gain.linearRampToValueAtTime(0, end + release);
     applied = true;
   }
   return applied;

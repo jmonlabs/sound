@@ -175,10 +175,14 @@ create(spec, Tone)  -> { node, isLoadable } | null   // null = not mine
 prepare(specs)      -> Promise                       // settle the CDN
 bendVoices(node, midi, startTime, anchors, baseCents) -> boolean
 holdVoices(node, midi, startTime, seconds)            -> boolean
+shapeVoices(node, midi, startTime, anchors, options)  -> boolean
 ```
 
-`anchors` are `{ time, value }`: seconds from the note start, cents from the
-written pitch.
+`anchors` are `{ time, value }` in seconds from the note start. For
+`bendVoices` the value is cents from the written pitch; for `shapeVoices` it is
+a multiple of the note's velocity, and `options` is
+`{ seconds, velocity, attack, release }`. `shapeVoices` replaces the note's
+whole gain path, so a host calls it after `holdVoices`.
 
 Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 `getPopularInstruments`, `BANKS`, `getSoundfontBank`, `setSoundfontBank`,

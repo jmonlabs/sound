@@ -54,6 +54,7 @@ import {
 
 import {
   analyseSustain,
+  applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
   canResample,
   prepareLoopRegion,
@@ -221,6 +222,32 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
 }
 
 /**
+ * Move a sounding note's loudness through a curve, so a held string or wind
+ * swells and eases off instead of sitting at one level.
+ *
+ * Replaces the note's whole gain path, attack and release included, so call
+ * it after holdVoices: stopping a voice again cancels scheduled gain values.
+ *
+ * @param {Object} node - The instrument, as returned by {@link create}
+ * @param {number} midi - The note's MIDI number
+ * @param {number} startTime - Absolute time in seconds of the note start
+ * @param {Array<{time: number, value: number}>} anchors - Time relative to
+ *   `startTime` in seconds, value as a multiple of the note's velocity
+ * @param {Object} options - `{ seconds, velocity, attack, release }`; attack
+ *   and release default to the instrument's own
+ * @returns {boolean} Whether any voice was reached
+ */
+export function shapeVoices(node, midi, startTime, anchors, options = {}) {
+  if (!canResample(node)) return false;
+  const seconds = (value) => (typeof node.toSeconds === "function" ? node.toSeconds(value) : Number(value) || 0);
+  return applyAmplitudeAnchorsToSampler(node, midi, startTime, anchors, {
+    ...options,
+    attack: options.attack ?? seconds(node.attack),
+    release: options.release ?? seconds(node.release),
+  });
+}
+
+/**
  * The provider object `jm.play(piece, { Tone, sound })` expects.
  *
  * Every method is optional from the caller's side, so a partial or custom
@@ -235,6 +262,7 @@ export const sound = {
   prepare,
   bendVoices,
   holdVoices,
+  shapeVoices,
   readSpec,
 
   // General MIDI.
@@ -275,6 +303,7 @@ export const sound = {
 
 export {
   analyseSustain,
+  applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
   BANKS,
   canResample,

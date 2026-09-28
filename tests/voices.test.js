@@ -101,3 +101,58 @@ test("a decaying sample is never edited", async () => {
   assert.equal(prepareLoopRegion(buffer, analyseSustain(buffer)), false);
   assert.deepEqual(Array.from(data), Array.from(original), "a piano's recording is left alone");
 });
+
+/* --- the loudness of a held note ----------------------------------------- */
+
+const fakeGain = () => {
+  const calls = [];
+  return {
+    calls,
+    cancelScheduledValues: (t) => calls.push(["cancel", t]),
+    setValueAtTime: (v, t) => calls.push(["set", v, t]),
+    linearRampToValueAtTime: (v, t) => calls.push(["ramp", +v.toFixed(6), +t.toFixed(6)]),
+  };
+};
+const fakeSampler = (gain) => ({ _activeSources: new Map([[60, [{ _gainNode: { gain } }]]]) });
+
+test("a loudness curve replaces the voice's whole gain path", async () => {
+  const { applyAmplitudeAnchorsToSampler } = await import("../src/voices.js");
+  const gain = fakeGain();
+  const reached = applyAmplitudeAnchorsToSampler(
+    fakeSampler(gain), 60, 10,
+    [{ time: 0, value: 0.2 }, { time: 1, value: 1 }, { time: 3, value: 0.6 }],
+    { seconds: 4, velocity: 0.5, attack: 0.1, release: 0.8 },
+  );
+  assert.equal(reached, true);
+  assert.deepEqual(gain.calls, [
+    ["cancel", 10],                 // Tone's attack and release are dropped
+    ["set", 0, 10],
+    ["ramp", 0.1, 10.1],            // the first anchor, no sooner than the attack
+    ["ramp", 0.5, 11],
+    ["ramp", 0.3, 13],
+    ["ramp", 0.3, 14],              // held to the end of the note
+    ["ramp", 0, 14.8],              // then released from where the curve is
+  ]);
+});
+
+test("anchors past the note's end are cut at the end", async () => {
+  const { applyAmplitudeAnchorsToSampler } = await import("../src/voices.js");
+  const gain = fakeGain();
+  applyAmplitudeAnchorsToSampler(
+    fakeSampler(gain), 60, 0,
+    [{ time: 0, value: 0 }, { time: 1, value: 1 }, { time: 5, value: 0 }],
+    { seconds: 2, velocity: 1, release: 0.5 },
+  );
+  assert.deepEqual(gain.calls.slice(-3), [["ramp", 1, 1], ["ramp", 0.75, 2], ["ramp", 0, 2.5]],
+    "the note ends where the curve is at that moment, a quarter of the way down");
+});
+
+test("shapeVoices takes the instrument's own attack and release", async () => {
+  const { shapeVoices } = await import("../src/index.js");
+  const gain = fakeGain();
+  const node = { ...fakeSampler(gain), attack: 0.3, release: 1.5, toSeconds: (v) => v };
+  assert.equal(shapeVoices(node, 60, 0, [{ time: 0, value: 1 }], { seconds: 2, velocity: 1 }), true);
+  assert.deepEqual(gain.calls.slice(2), [["ramp", 1, 0.3], ["ramp", 1, 2], ["ramp", 0, 3.5]]);
+  assert.equal(shapeVoices({}, 60, 0, [{ time: 0, value: 1 }], { seconds: 1 }), false,
+    "an instrument that is not a Sampler is left alone");
+});
