@@ -272,7 +272,7 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 node --test tests/*.test.js
 ```
 
-68 tests, no dependencies and no network: the CDN probe takes an injected
+70 tests, no dependencies and no network: the CDN probe takes an injected
 `fetch`.
 
 ## License

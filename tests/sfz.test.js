@@ -89,6 +89,14 @@ test("a region answers the keys, velocities, round and key switch it is mapped t
   assert.equal(regionWeight({ sw_last: 36 }, { ...note, keyswitch: 36 }), 1);
 });
 
+test("a legato instrument plays its first note and its slurred notes from different regions", () => {
+  assert.equal(regionWeight({ trigger: "first" }, note), 1);
+  assert.equal(regionWeight({ trigger: "first" }, { ...note, legato: true }), 0);
+  assert.equal(regionWeight({ trigger: "legato" }, note), 0);
+  assert.equal(regionWeight({ trigger: "legato" }, { ...note, legato: true }), 1);
+  assert.equal(regionWeight({}, { ...note, legato: true }), 1, "an ordinary region plays either way");
+});
+
 test("a velocity crossfade plays a region partly, at equal power", () => {
   const layer = { xfin_lovel: 63, xfin_hivel: 127 };
   assert.equal(regionWeight(layer, { ...note, velocity: 63 }), 0);
@@ -222,6 +230,26 @@ test("a short note the staccato file does not cover plays the sustain file", asy
   await node.loaded;
   node.triggerAttack(96, 0, 1, 0.1);
   assert.deepEqual(node.voices.map((v) => v.plan.sample.split("/").pop()), ["long.wav"]);
+});
+
+test("a slurred note starts from the legato regions, and fades the previous one over off_time", async () => {
+  serve({
+    "legato.sfz": [
+      "<group> trigger=first group=1 off_by=1 off_mode=time off_time=1 <region> sample=first.wav",
+      "<group> trigger=legato group=1 off_by=1 off_mode=time off_time=1 <region> sample=slur.wav",
+    ].join("\n"),
+    "first.wav": "", "slur.wav": "",
+  });
+  const context = fakeContext();
+  const { node } = sound.create({ sfz: "https://x/legato.sfz" }, fakeTone(context));
+  await node.loaded;
+  node.triggerAttack(60, 0, 1);
+  node.triggerRelease(60, 1);
+  node.triggerAttack(62, 1, 1); // starts as the first ends: slurred
+  node.triggerRelease(62, 2);
+  node.triggerAttack(64, 5, 1); // after a rest: a first note again
+  const played = node.voices.map((v) => v.plan.sample.split("/").pop());
+  assert.deepEqual(played, ["first.wav", "slur.wav", "first.wav"]);
 });
 
 test("a released note falls 60 dB over its release from where its envelope is", async () => {

@@ -16,7 +16,8 @@
  *
  * Opcodes read: the key and velocity ranges, crossfades, round robins
  * (seq_length, seq_position), random choice (lorand, hirand), key switches
- * (sw_*), release triggers, choke groups (group, off_by, off_mode), tuning,
+ * (sw_*), release triggers, legato triggers (first, legato), choke groups
+ * (group, off_by, off_mode, off_time), tuning,
  * volume, pan, velocity tracking, the amplitude envelope (ampeg_*, with
  * velocity), delays and offsets, loops (from the file or the opcodes), the
  * pitch LFO, the filter, the three-band EQ, and controllers (set_ccN, and
@@ -140,21 +141,32 @@ function bufferIn(context, url) {
  * @param {number} note.key - MIDI key
  * @param {number} note.velocity - 1 to 127
  * @param {string} note.trigger - "attack" or "release"
+ * @param {boolean} [note.legato=false] - another note is still sounding (or
+ *   ends as this one starts): `trigger=legato` regions answer, not
+ *   `trigger=first` ones
  * @param {number} note.random - 0 to 1, the same for every region of a note
  * @param {number} note.round - how many times this key has been played before
  * @param {number|null} note.keyswitch - the last key switch pressed
  * @returns {number} the region's share of the note, 0 when it is silent
  */
-export function regionWeight(region, { key, velocity, trigger, random, round, keyswitch }) {
+export function regionWeight(region, { key, velocity, trigger, legato = false, random, round, keyswitch }) {
   if (key < (region.lokey ?? 0) || key > (region.hikey ?? 127)) return 0;
   if (velocity < (region.lovel ?? 1) || velocity > (region.hivel ?? 127)) return 0;
-  if ((region.trigger ?? "attack") !== trigger) return 0;
+  if (!answersTrigger(region.trigger ?? "attack", trigger, legato)) return 0;
   if (random < (region.lorand ?? 0) || random >= (region.hirand ?? 1.0001)) return 0;
   if (region.seq_length > 1 && (round % region.seq_length) + 1 !== (region.seq_position ?? 1)) return 0;
   if (typeof region.sw_last === "number" && keyswitch !== null && keyswitch !== region.sw_last) return 0;
   const byVelocity = crossfade(velocity, region.xfin_lovel, region.xfin_hivel, region.xfout_lovel, region.xfout_hivel, region.xf_velcurve);
   const byKey = crossfade(key, region.xfin_lokey, region.xfin_hikey, region.xfout_lokey, region.xfout_hikey, region.xf_keycurve);
   return byVelocity * byKey;
+}
+
+/** Whether a region's `trigger` answers a note starting or ending. */
+function answersTrigger(regionTrigger, trigger, legato) {
+  if (trigger === "release") return regionTrigger === "release";
+  if (regionTrigger === "first") return !legato;
+  if (regionTrigger === "legato") return legato;
+  return regionTrigger === "attack";
 }
 
 /** A fade in over [inLow, inHigh] and out over [outLow, outHigh], equal power unless "gain". */
@@ -223,6 +235,7 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
     group: region.group ?? 0,
     offBy: region.off_by ?? null,
     offMode: region.off_mode ?? "fast",
+    offTime: region.off_time ?? 0.006,
     envelope: {
       delay: seconds(envelope.delay ?? (region.ampeg_delay ?? 0) + byVelocity("delay")),
       attack: seconds(envelope.attack ?? (region.ampeg_attack ?? 0) + byVelocity("attack")),
@@ -442,7 +455,11 @@ class SfzInstrument {
 
   startRegions(file, { key, velocity, trigger, round, cents = 0 }, at) {
     const random = this.random();
-    const note = { key, velocity, trigger, random, round, keyswitch: file.keyswitch };
+    // Legato: a note still sounds, or lets go just as this one starts, the
+    // way a slurred line is written.
+    const legato = trigger === "attack"
+      && this.voices.some((v) => v.trigger !== "release" && v.start < at && v.releasedAt >= at);
+    const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch };
     const started = [];
     for (const region of file.regions) {
       const weight = regionWeight(region, note);
@@ -468,7 +485,8 @@ class SfzInstrument {
     if (!group) return;
     for (const voice of this.voices) {
       if (voice.plan.offBy === group && voice.start < at && voice.releasedAt > at) {
-        this.releaseVoice(voice, at, voice.plan.offMode === "normal" ? voice.plan.envelope.release : 0.006);
+        const fade = { normal: voice.plan.envelope.release, time: voice.plan.offTime }[voice.plan.offMode] ?? 0.006;
+        this.releaseVoice(voice, at, fade);
       }
     }
   }
