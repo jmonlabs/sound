@@ -188,7 +188,7 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 `getPopularInstruments`, `BANKS`, `getSoundfontBank`, `setSoundfontBank`,
 `getSoundfontBase`, `setSoundfontBase`, `resolveSoundfontBase`,
 `getSoundfontSources`, `setSoundfontSources`, `getSoundfontFormat`,
-`setSoundfontFormat`,
+`setSoundfontFormat`, `getSamplingStrategy`, `setSamplingStrategy`,
 `GM_SAMPLE_SECONDS`, `gmMaxBeats`, `drumKits`, `registerDrumKit`,
 `getDrumKit`, `analyseSustain`, `prepareLoopRegion`, `canResample`.
 

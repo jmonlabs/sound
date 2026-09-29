@@ -33,12 +33,14 @@ import {
   generateCompleteSamplerUrls,
   generateSamplerUrls,
   getPopularInstruments,
+  getSamplingStrategy,
   getSoundfontBank,
   getSoundfontBase,
   getSoundfontFormat,
   getSoundfontSources,
   gmMaxBeats,
   resolveSoundfontBase,
+  setSamplingStrategy,
   setSoundfontBank,
   setSoundfontBase,
   setSoundfontFormat,
@@ -120,14 +122,16 @@ export function readSpec(spec) {
 
 /**
  * The base URL for a named bank, on the source currently in use — so a
- * per-track bank follows whichever CDN answered the probe.
+ * per-track bank follows whichever source answered the probe, including one
+ * set with setSoundfontSources (a local copy, a mirror).
  */
 function bankBase(bank) {
   if (!BANKS.includes(bank)) {
     console.warn(`Unknown sample bank "${bank}". Using ${getSoundfontBank()}.`);
     return undefined;
   }
-  const root = CDN_ROOTS.find((r) => getSoundfontBase().startsWith(r)) || CDN_ROOTS[0];
+  const sources = getSoundfontSources();
+  const root = sources.find((r) => getSoundfontBase().startsWith(r)) || sources[0];
   return `${root}/${bank}`;
 }
 
@@ -282,6 +286,8 @@ export const sound = {
   setSoundfontBank,
   getSoundfontSources,
   setSoundfontSources,
+  getSamplingStrategy,
+  setSamplingStrategy,
   getSoundfontFormat,
   setSoundfontFormat,
 
@@ -316,6 +322,7 @@ export {
   generateSamplerUrls,
   getDrumKit,
   getPopularInstruments,
+  getSamplingStrategy,
   getSoundfontBank,
   getSoundfontBase,
   getSoundfontFormat,
@@ -327,6 +334,7 @@ export {
   prepareLoopRegion,
   registerDrumKit,
   resolveSoundfontBase,
+  setSamplingStrategy,
   setSoundfontBank,
   setSoundfontBase,
   setSoundfontFormat,

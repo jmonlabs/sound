@@ -284,6 +284,34 @@ export function setSoundfontBank(bank) {
 
 let pendingProbe = null;
 
+const STRATEGIES = ["minimal", "balanced", "quality", "complete"];
+let activeStrategy = "balanced";
+
+/** How many recordings an instrument loads when its spec does not say. */
+export function getSamplingStrategy() {
+  return activeStrategy;
+}
+
+/**
+ * Choose how many recordings each instrument loads when its spec does not
+ * say. Every note that has no recording of its own is the nearest one sped
+ * up or slowed down, which thins the sound the further it goes.
+ *
+ * 'balanced' (one every major third, two semitones of stretch at most) is the
+ * default because every file is a request to a CDN. From a local copy of the
+ * bank, 'complete' (one per semitone, no stretch at all) costs next to nothing.
+ *
+ * @param {string} strategy - 'minimal', 'balanced', 'quality' or 'complete'
+ * @returns {string} The strategy now in use
+ */
+export function setSamplingStrategy(strategy) {
+  if (!STRATEGIES.includes(strategy)) {
+    throw new Error(`Unknown sampling strategy "${strategy}". Choose one of: ${STRATEGIES.join(", ")}.`);
+  }
+  activeStrategy = strategy;
+  return activeStrategy;
+}
+
 /**
  * Pick a working CDN by asking each one for a single file, in order.
  *
@@ -349,7 +377,7 @@ export function generateSamplerUrls(
   gmProgram,
   baseUrl = getSoundfontBase(),
   noteRange = [21, 108],
-  strategy = "balanced",
+  strategy = getSamplingStrategy(),
 ) {
   const instrument = GM_INSTRUMENTS[gmProgram];
   if (!instrument) {
@@ -554,7 +582,7 @@ export function createGMInstrumentNode(
     baseUrl = getSoundfontBase(),
     noteRange = [21, 108],
     envelope = { attack: 0.1, release: 1.0 },
-    strategy = "balanced",
+    strategy = getSamplingStrategy(),
   } = options;
 
   return {

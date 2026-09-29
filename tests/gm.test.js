@@ -397,3 +397,36 @@ test("an unregistered kit is declined, not guessed at", async () => {
   assert.equal(create("drumkit:nothing-here", Tone), null);
   assert.equal(create({ kit: "nothing-here" }, Tone), null);
 });
+
+/* --- a local copy of the banks ------------------------------------------- */
+
+test("the sampling strategy has a default that can be changed", async () => {
+  const { generateSamplerUrls, setSamplingStrategy, getSamplingStrategy } = await import("../src/gm.js");
+  const violin = [55, 103];
+  try {
+    assert.equal(getSamplingStrategy(), "balanced");
+    const balanced = Object.keys(generateSamplerUrls(40, "base", violin)).length;
+    setSamplingStrategy("complete");
+    assert.equal(Object.keys(generateSamplerUrls(40, "base", violin)).length, 49, "one recording per semitone");
+    assert.ok(balanced < 20, "against one every major third");
+    assert.equal(Object.keys(generateSamplerUrls(40, "base", violin, "minimal")).length < 49, true,
+      "a spec that names its strategy still gets it");
+    assert.throws(() => setSamplingStrategy("everything"), /Unknown sampling strategy/);
+  } finally {
+    setSamplingStrategy("balanced");
+  }
+});
+
+test("a per-track bank follows sources set with setSoundfontSources", async () => {
+  const { create, setSoundfontSources } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  try {
+    setSoundfontSources("/__files/samples/midi-js-soundfonts");
+    const { node } = create({ gm: 40, bank: "MusyngKite" }, { Sampler });
+    const urls = Object.values(node.options.urls);
+    assert.ok(urls.every((u) => u.startsWith("/__files/samples/midi-js-soundfonts/MusyngKite/violin-mp3/")),
+      `a local copy is used for a named bank too, got ${urls[0]}`);
+  } finally {
+    setSoundfontSources(null);
+  }
+});
