@@ -171,6 +171,32 @@ release. Override either on the track:
 Both reach into `Tone.Sampler._activeSources`, which is internal, so both are
 feature-detected and return `false` if a future version moves it.
 
+## SoundFont banks
+
+`.sf2`, `.sf3` and `.dls` banks are played by
+[spessasynth](https://github.com/spessasus/spessasynth_lib) (Apache-2.0), an
+AudioWorklet in Tone's own context. Say once where it is, and optionally which
+bank plays General MIDI programs:
+
+```js
+sound.useSoundfont({
+  library: "/vendor/spessasynth/spessasynth_lib.js",
+  processor: "/vendor/spessasynth/spessasynth_processor.min.js",
+  bank: "/samples/soundfonts/MuseScore_General.sf3", // optional: { gm } tracks
+});
+
+{ gm: 40 }                                        // violin, from the bank above
+{ sf2: "/samples/soundfonts/GeneralUser-GS.sf2", program: 0 }  // any bank, per track
+{ sf2: "/samples/soundfonts/MuseScore_General.sf3", program: 40, bankSelect: 8 } // a variation
+```
+
+Each bank file gets a synthesizer of its own, with its own bank numbers and 15
+channels (channel 9, General MIDI's drums, is left out). A track is one channel:
+its loudness curve is the channel's expression (CC 11), and its pitch curve the
+channel's pitch wheel, so two overlapping notes on one track swell and bend
+together. `controllers` sets any controller at the start, e.g. `{ 73: 100 }` for
+a softer attack; `{ gm }` tracks of bowed strings get that one by default.
+
 ## SFZ instruments
 
 An [SFZ](https://sfzformat.com) instrument is a text file and a folder of
@@ -246,7 +272,7 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 node --test tests/*.test.js
 ```
 
-66 tests, no dependencies and no network: the CDN probe takes an injected
+68 tests, no dependencies and no network: the CDN probe takes an injected
 `fetch`.
 
 ## License

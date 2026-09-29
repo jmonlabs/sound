@@ -119,3 +119,38 @@ test("a pitch curve becomes the channel's pitch wheel, back to the centre after 
     sound.useSoundfont(null);
   }
 });
+
+test("a track can take a program from any bank, each bank with a synthesizer of its own", async () => {
+  sent.length = 0;
+  sound.useSoundfont({ library, processor: "processor.js" });
+  try {
+    const Tone = fakeTone();
+    assert.equal(sound.create({ gm: 40 }, Tone).node.isSoundfont, undefined, "with no bank named, GM programs stay Samplers");
+    const violin = sound.create({ sf2: "strings.sf2", program: 40 }, Tone).node;
+    const piano = sound.create({ sf2: "pianos.sf2", program: 0, bankSelect: 8 }, Tone).node;
+    await Promise.all([violin.loaded, piano.loaded]);
+    assert.notEqual(violin._entry, piano._entry, "two banks, two synthesizers");
+    assert.deepEqual([violin.channel, piano.channel], [0, 0], "each with its own channels");
+    assert.equal(sent.filter((m) => m[0] === "bank").length, 2);
+    const setup = sent.filter((m) => m[0] === "program" || (m[0] === "cc" && m[2] === 0));
+    assert.deepEqual(setup, [["program", 0, 40], ["cc", 0, 0, 8, undefined], ["program", 0, 0]], "the bank number is selected before the program");
+    assert.equal(sent.some((m) => m[0] === "cc" && m[2] === 73), false, "a bank of one's choosing keeps its own attack");
+    const second = sound.create({ sf2: "strings.sf2", program: 42 }, Tone).node;
+    assert.equal(second._entry, violin._entry, "the same bank shares its synthesizer");
+    assert.equal(second.channel, 1);
+  } finally {
+    sound.useSoundfont(null);
+  }
+});
+
+test("an sf2 track with no engine named says so and is not built", () => {
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (m) => warnings.push(m);
+  try {
+    assert.equal(sound.create({ sf2: "strings.sf2", program: 40 }, fakeTone()), null);
+    assert.match(warnings[0], /useSoundfont\(\{ library, processor \}\)/);
+  } finally {
+    console.warn = warn;
+  }
+});

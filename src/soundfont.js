@@ -15,14 +15,28 @@
  * Tone.Gain as its output, which the host connects to the track's bus as it
  * would a Sampler: panning, effects and mastering are unchanged.
  *
- * Opt in with useSoundfont(); a spec may opt out with `soundfont: false`.
+ * Two ways in, both after useSoundfont() has said where the engine is:
+ *
+ *   - `{ gm: 40 }`, when useSoundfont() also names a bank: General MIDI
+ *     programs are played by that bank (a spec may opt out with
+ *     `soundfont: false`);
+ *   - `{ sf2: "…/bank.sf2", program: 40, bankSelect: 0 }`: any bank, per track, so
+ *     one piece can take its violin from one bank and its piano from another.
+ *
+ * Each bank file has a synthesizer of its own, so every bank keeps its own
+ * bank numbers and 15 channels.
  */
 
 let settings = null;
 let libraryModule = null;
-let bankBytes = null;
 
-/** Shared synthesizers, per Tone context: { ready: Promise<synth>, channels: Set<number> }. */
+/** Each bank file's bytes, fetched once: url → Promise<ArrayBuffer>. */
+const bankBytes = new Map();
+
+/**
+ * Shared synthesizers, per Tone context and bank file:
+ * context → Map(url → { ready: Promise<synth>, channels: Set<number> }).
+ */
 const shared = new WeakMap();
 
 /** Semitones the pitch wheel covers either way. */
@@ -41,22 +55,25 @@ const ATTACKS = [
 ];
 
 /**
- * Play General MIDI instruments with a SoundFont bank, or stop (null).
+ * Say where the SoundFont engine is, and which bank plays General MIDI
+ * programs, if any; or stop (null).
  *
  * @param {Object|null} options
- * @param {string} options.bank - URL of an SF2, SF3 or DLS file
  * @param {string} options.library - URL of spessasynth_lib as one ES module
  * @param {string} options.processor - URL of spessasynth's AudioWorklet processor
+ * @param {string} [options.bank] - URL of an SF2, SF3 or DLS file for `{ gm }`
+ *   tracks; without it they stay Samplers, and only `{ sf2 }` tracks use the
+ *   engine
  */
 export function useSoundfont(options) {
   settings = options ? { ...options } : null;
   libraryModule = null;
-  bankBytes = null;
+  bankBytes.clear();
 }
 
 /** True when GM instruments are played by a SoundFont bank. */
 export function soundfontInUse() {
-  return settings !== null;
+  return Boolean(settings?.bank);
 }
 
 /** The default attack (CC 73) of a GM program. */
@@ -66,38 +83,55 @@ export function defaultSoundfontAttack(program) {
 }
 
 /**
- * A SoundFont instrument for a GM program, or null when none can be made (no
- * bank in use, or every channel of this context taken): the caller then
- * builds a Sampler as before.
+ * A SoundFont instrument, or null when none can be made (no engine, or every
+ * channel of this bank's synthesizer taken).
+ *
+ * @param {Object} Tone
+ * @param {Object} preset
+ * @param {number} preset.program - 0 to 127
+ * @param {string} [preset.bank] - the bank file; the one useSoundfont() names
+ *   by default, whose General MIDI programs start with the family's attack
+ *   (see defaultSoundfontAttack)
+ * @param {number} [preset.bankSelect=0] - the bank number inside the file,
+ *   where a bank keeps variations of its programs
+ * @param {Object} [preset.controllers] - controller number → 0..127
  */
-export function createSoundfontInstrument(Tone, program, controllers = {}) {
-  if (!settings || !Tone?.getContext) return null;
+export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {} }) {
+  if (!settings?.library || !settings?.processor || !Tone?.getContext) {
+    console.warn("A SoundFont track needs useSoundfont({ library, processor }) first.");
+    return null;
+  }
+  const url = bank ?? settings.bank;
+  if (!url) return null;
   const context = Tone.getContext();
-  const entry = sharedFor(context);
+  const entry = sharedFor(context, url);
   const channel = CHANNELS.find((c) => !entry.channels.has(c));
   if (channel === undefined) return null;
   entry.channels.add(channel);
-  return new SoundfontInstrument(Tone, context, entry, channel, program, {
-    73: defaultSoundfontAttack(program),
+  const familyAttack = bank === undefined ? { 73: defaultSoundfontAttack(program) } : {};
+  return new SoundfontInstrument(Tone, context, entry, channel, program, bankSelect, {
+    ...familyAttack,
     ...controllers,
   });
 }
 
-function sharedFor(context) {
-  if (!shared.has(context)) {
-    shared.set(context, { ready: startSynth(context), channels: new Set() });
-  }
-  return shared.get(context);
+function sharedFor(context, url) {
+  if (!shared.has(context)) shared.set(context, new Map());
+  const synths = shared.get(context);
+  if (!synths.has(url)) synths.set(url, { ready: startSynth(context, url), channels: new Set() });
+  return synths.get(url);
 }
 
-async function startSynth(context) {
-  const { bank, library, processor } = settings;
+async function startSynth(context, bank) {
+  const { library, processor } = settings;
   libraryModule ??= import(library);
-  bankBytes ??= fetch(bank).then((r) => {
-    if (!r.ok) throw new Error(`Could not load the SoundFont bank ${bank} (${r.status})`);
-    return r.arrayBuffer();
-  });
-  const [{ WorkletSynthesizer }, bytes] = await Promise.all([libraryModule, bankBytes]);
+  if (!bankBytes.has(bank)) {
+    bankBytes.set(bank, fetch(bank).then((r) => {
+      if (!r.ok) throw new Error(`Could not load the SoundFont bank ${bank} (${r.status})`);
+      return r.arrayBuffer();
+    }));
+  }
+  const [{ WorkletSynthesizer }, bytes] = await Promise.all([libraryModule, bankBytes.get(bank)]);
   await context.addAudioWorkletModule(processor, "spessasynth");
   const synth = new WorkletSynthesizer(context.rawContext, {
     audioNodeCreators: { worklet: (_, name, options) => context.createAudioWorkletNode(name, options) },
@@ -115,7 +149,7 @@ async function startSynth(context) {
  * triggerRelease, triggerAttackRelease, releaseAll, dispose).
  */
 class SoundfontInstrument {
-  constructor(Tone, context, entry, channel, program, controllers) {
+  constructor(Tone, context, entry, channel, program, bankSelect, controllers) {
     this.Tone = Tone;
     this.context = context;
     this.channel = channel;
@@ -130,6 +164,7 @@ class SoundfontInstrument {
       if (this.disposed) return;
       this.synth = synth;
       synth.connectChannel(this.output.input, channel);
+      if (bankSelect) synth.controllerChange(channel, 0, bankSelect);
       synth.programChange(channel, program);
       // Room for a glissando of an octave either way (see bend).
       synth.pitchWheelRange(channel, BEND_RANGE);

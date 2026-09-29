@@ -88,13 +88,14 @@ function midiToNoteName(midi) {
  * Read a track's `synth` spec and say what sampled instrument it asks for.
  *
  * Recognised: a General MIDI program number, `{ gm }` or `{ program }` with
- * the sampling options beside it, a drum kit name, and `{ sfz }`, an SFZ
- * instrument (see sfz.js). Anything else — a Tone
+ * the sampling options beside it, a drum kit name, `{ sfz }`, an SFZ
+ * instrument (see sfz.js), and `{ sf2, program, bankSelect }`, a program of a
+ * SoundFont bank (see soundfont.js). Anything else — a Tone
  * class name, an inline `{ type, options }` — is not this package's business,
  * so it returns `null` and the caller builds it itself.
  *
  * @param {*} spec - A track's `synth`, after any preset has been expanded
- * @returns {{kind: 'gm'|'drumkit'|'sfz', ...}|null}
+ * @returns {{kind: 'gm'|'drumkit'|'sfz'|'sf2', ...}|null}
  */
 export function readSpec(spec) {
   if (typeof spec === "number") return { kind: "gm", program: spec };
@@ -113,6 +114,16 @@ export function readSpec(spec) {
         staccatoUnder: spec.staccatoUnder,
         envelope: spec.envelope,
         volume: spec.volume,
+        controllers: spec.controllers,
+      };
+    }
+
+    if (typeof spec.sf2 === "string") {
+      return {
+        kind: "sf2",
+        bank: spec.sf2,
+        program: spec.program ?? 0,
+        bankSelect: spec.bankSelect ?? 0,
         controllers: spec.controllers,
       };
     }
@@ -174,6 +185,12 @@ export function create(spec, Tone) {
   const asked = readSpec(spec);
   if (!asked || !Tone?.Sampler) return null;
 
+  if (asked.kind === "sf2") {
+    const { kind, ...preset } = asked;
+    const node = createSoundfontInstrument(Tone, preset);
+    return node ? { node, isLoadable: true } : null;
+  }
+
   if (asked.kind === "sfz") {
     const { kind, ...options } = asked;
     return { node: createSfzInstrument(Tone, options), isLoadable: true };
@@ -183,7 +200,7 @@ export function create(spec, Tone) {
     // With a SoundFont bank in use, the bank plays it (see soundfont.js),
     // unless the track says `soundfont: false` or no channel is left.
     if (soundfontInUse() && asked.soundfont !== false) {
-      const node = createSoundfontInstrument(Tone, asked.program, asked.controllers);
+      const node = createSoundfontInstrument(Tone, { program: asked.program, controllers: asked.controllers });
       if (node) return { node, isLoadable: true };
     }
     const urls = generateSamplerUrls(
