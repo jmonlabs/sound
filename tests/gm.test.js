@@ -430,3 +430,20 @@ test("a per-track bank follows sources set with setSoundfontSources", async () =
     setSoundfontSources(null);
   }
 });
+
+test("the built-in drum kits can come from a local copy", async () => {
+  const { create, setDrumKitSource, registerDrumKit, drumKits } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  try {
+    registerDrumKit("mine", { baseUrl: "https://example.test/kit/", samples: { 36: "k.mp3" } });
+    setDrumKitSource("/__files/samples/tonejs-audio");
+    assert.equal(create("drumkit:acoustic", { Sampler }).node.options.baseUrl,
+      "/__files/samples/tonejs-audio/drum-samples/acoustic-kit/");
+    assert.equal(drumKits.r8.baseUrl, "/__files/samples/tonejs-audio/drum-samples/R8/");
+    assert.equal(drumKits.mine.baseUrl, "https://example.test/kit/", "a registered kit keeps its own");
+  } finally {
+    setDrumKitSource(null);
+    delete drumKits.mine;
+  }
+  assert.equal(drumKits.acoustic.baseUrl, "https://tonejs.github.io/audio/drum-samples/acoustic-kit/");
+});

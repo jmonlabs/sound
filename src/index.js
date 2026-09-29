@@ -52,6 +52,7 @@ import {
   getDrumKit,
   parseDrumKitSpec,
   registerDrumKit,
+  setDrumKitSource,
 } from "./drumkits.js";
 
 import {
@@ -300,6 +301,7 @@ export const sound = {
   drumKits,
   registerDrumKit,
   getDrumKit,
+  setDrumKitSource,
 
   // The analysis behind holdVoices, exposed because it is the interesting part.
   analyseSustain,
@@ -334,6 +336,7 @@ export {
   prepareLoopRegion,
   registerDrumKit,
   resolveSoundfontBase,
+  setDrumKitSource,
   setSamplingStrategy,
   setSoundfontBank,
   setSoundfontBase,

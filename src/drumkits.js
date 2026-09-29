@@ -25,6 +25,9 @@
  *   });
  */
 
+/** Where the built-in kits come from: Tone.js's audio repository, on GitHub Pages. */
+const TONE_AUDIO = "https://tonejs.github.io/audio";
+
 export const drumKits = {
   /**
    * Tone.js's own acoustic kit. CORS-friendly (GitHub Pages).
@@ -34,7 +37,7 @@ export const drumKits = {
    * Source: https://github.com/Tonejs/audio/tree/master/drum-samples/acoustic-kit
    */
   acoustic: {
-    baseUrl: "https://tonejs.github.io/audio/drum-samples/acoustic-kit/",
+    baseUrl: `${TONE_AUDIO}/drum-samples/acoustic-kit/`,
     samples: {
       36: "kick.mp3",
       38: "snare.mp3",
@@ -51,7 +54,7 @@ export const drumKits = {
    * sounds listed in the source. Adjust if you find more.
    */
   r8: {
-    baseUrl: "https://tonejs.github.io/audio/drum-samples/R8/",
+    baseUrl: `${TONE_AUDIO}/drum-samples/R8/`,
     samples: {
       36: "kick.mp3",
       38: "snare.mp3",
@@ -63,6 +66,20 @@ export const drumKits = {
     },
   },
 };
+
+/**
+ * Load the built-in kits from somewhere else: a local copy of Tone.js's audio
+ * repository, laid out the same way (`drum-samples/acoustic-kit/kick.mp3`).
+ * Passing null restores GitHub Pages. Kits added with registerDrumKit keep
+ * their own baseUrl.
+ *
+ * @param {string|null} root - The folder that contains `drum-samples/`
+ */
+export function setDrumKitSource(root) {
+  const base = root || TONE_AUDIO;
+  drumKits.acoustic.baseUrl = `${base}/drum-samples/acoustic-kit/`;
+  drumKits.r8.baseUrl = `${base}/drum-samples/R8/`;
+}
 
 /**
  * Register a custom drum kit at runtime.
