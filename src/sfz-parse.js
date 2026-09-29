@@ -39,7 +39,7 @@ export function sfzKey(value) {
 const KEY_OPCODES = new Set([
   "key", "lokey", "hikey", "pitch_keycenter",
   "sw_lokey", "sw_hikey", "sw_last", "sw_default", "sw_down", "sw_up",
-  "xfin_lokey", "xfin_hikey", "xfout_lokey", "xfout_hikey",
+  "xfin_lokey", "xfin_hikey", "xfout_lokey", "xfout_hikey", "fil_keycenter",
 ]);
 
 /** Opcodes whose value is text; the rest are numbers. */

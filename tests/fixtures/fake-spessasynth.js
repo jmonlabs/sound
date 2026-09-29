@@ -15,4 +15,5 @@ export class WorkletSynthesizer {
   noteOff(channel, midi, options) { sent.push(["off", channel, midi, options?.time]); }
   pitchWheel(channel, value, options) { sent.push(["wheel", channel, value, options?.time]); }
   pitchWheelRange(channel, range) { sent.push(["range", channel, range]); }
+  channelPressure(channel, value, options) { sent.push(["pressure", channel, value, options?.time]); }
 }

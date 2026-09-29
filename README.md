@@ -223,6 +223,23 @@ velocity layers and crossfades, round robins, key switches, release triggers
 (the bow leaving the string), choke groups, envelope, pitch LFO, filter and EQ
 are played; `sfz.js` lists the opcodes read.
 
+Controllers move sounding notes too. A piece's controller moves (`track.cc`,
+`note.modulations`, `midi.ccN` automation lanes, gathered by io's
+`controllerEvents`) reach the instrument as `controllerChange`, and each voice
+follows the controllers its regions name: gain (`gain_ccN`, `volume_ccN`), its
+share of a crossfade between layers (`xfin_loccN`…), and brightness
+(`cutoff_ccN`). That is how the "performance" instruments of Sonatina or
+Virtual Playing Orchestra swell on a held note under the mod wheel:
+
+```js
+automation: [{ target: "midi.cc1", anchorPoints: [
+  { time: 0, value: 0.1 }, { time: 4, value: 1 }, { time: 8, value: 0.1 },
+] }]
+```
+
+A SoundFont instrument passes the same moves to its channel, plus pitch bend
+(±2 semitones) and channel pressure.
+
 WAV files are read by the package, not decoded by the browser, so they keep
 their own sample rate and the loop in their `smpl` chunk: Firefox's resampling
 at decode smears a file's last frames, and a loop ending there clicks each
@@ -272,7 +289,7 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 node --test tests/*.test.js
 ```
 
-70 tests, no dependencies and no network: the CDN probe takes an injected
+73 tests, no dependencies and no network: the CDN probe takes an injected
 `fetch`.
 
 ## License

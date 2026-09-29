@@ -181,19 +181,52 @@ function crossfade(value, inLow, inHigh, outLow, outHigh, curve = "power") {
   return curve === "gain" ? share : Math.sqrt(share);
 }
 
-/** The value a controller-driven opcode adds: `gain_cc1=34` adds 34 × cc1/127. */
+/**
+ * The value a controller-driven opcode adds: `gain_cc1=34` adds 34 × cc1/127.
+ * SFZ spells them `gain_cc1`, `gain_oncc1` and, for the envelope,
+ * `ampeg_attackcc1`.
+ */
 function byControllers(region, names, controllers) {
   let total = 0;
   for (const [opcode, amount] of Object.entries(region)) {
-    const match = /^(\w+?)_(?:on)?cc(\d+)$/.exec(opcode);
-    if (match && names.includes(match[1])) total += amount * ((controllers[match[2]] ?? 0) / 127);
+    const match = /^(.+?)_?(?:on)?cc(\d+)$/.exec(opcode);
+    if (match && names.includes(match[1]) && typeof amount === "number") {
+      total += amount * ((controllers[match[2]] ?? 0) / 127);
+    }
   }
   return total;
 }
 
 /**
+ * What the controllers do to a sounding voice, and keep doing while it
+ * sounds: its gain (`gain_ccN`, `volume_ccN`), its share of a crossfade
+ * between layers (`xfin_loccN`…, the mod wheel moving from a soft recording
+ * to a loud one), and its brightness (`cutoff_ccN`, cents).
+ *
+ * @param {Object} region
+ * @param {Object} controllers - controller number → 0..127
+ * @returns {{gain: number, cutoffCents: number}}
+ */
+export function controlPlan(region, controllers) {
+  let share = 1;
+  const numbers = new Set();
+  for (const opcode of Object.keys(region)) {
+    const match = /^xf(?:in|out)_(?:lo|hi)cc(\d+)$/.exec(opcode);
+    if (match) numbers.add(match[1]);
+  }
+  for (const n of numbers) {
+    share *= crossfade(controllers[n] ?? 0, region[`xfin_locc${n}`], region[`xfin_hicc${n}`],
+      region[`xfout_locc${n}`], region[`xfout_hicc${n}`], region.xf_cccurve);
+  }
+  const decibels = byControllers(region, ["gain", "volume"], controllers);
+  return { gain: share * 10 ** (decibels / 20), cutoffCents: byControllers(region, ["cutoff"], controllers) };
+}
+
+/**
  * What a region does with a note, in numbers: no audio is touched, so this is
- * where the SFZ's meaning lives, and what the tests read.
+ * where the SFZ's meaning lives, and what the tests read. The controllers
+ * count as they are when the note starts; what they keep doing to it is
+ * controlPlan's.
  *
  * @param {Object} region
  * @param {Object} note
@@ -208,7 +241,8 @@ function byControllers(region, names, controllers) {
  * @param {number} [note.volume=0] - the track's own volume, dB
  */
 export function voicePlan(region, { key, velocity, weight, controllers, random, envelope = {}, volume = 0 }) {
-  const byVelocity = (opcode) => (region[`ampeg_vel2${opcode}`] ?? 0) * (velocity / 127);
+  const byVelocity = (opcode) => (region[`ampeg_vel2${opcode}`] ?? 0) * (velocity / 127)
+    + byControllers(region, [`ampeg_${opcode}`], controllers);
   const spread = (opcode) => (region[opcode] ?? 0) * (random() * 2 - 1);
 
   const semitones = (key - (region.pitch_keycenter ?? 60)) * ((region.pitch_keytrack ?? 100) / 100) + (region.transpose ?? 0);
@@ -216,8 +250,9 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
 
   const veltrack = (region.amp_veltrack ?? 100) / 100;
   const velocityDb = velocity > 0 ? veltrack * 40 * Math.log10(velocity / 127) : -Infinity;
-  const decibels = (region.volume ?? 0) + (region.gain ?? 0) + volume + velocityDb + spread("amp_random")
-    + byControllers(region, ["gain", "volume"], controllers);
+  // The controllers' part of the gain is the voice's control gain (see
+  // controlPlan), which follows them while the note sounds.
+  const decibels = (region.volume ?? 0) + (region.gain ?? 0) + volume + velocityDb + spread("amp_random");
   const amplitude = (region.amplitude ?? 100) / 100;
 
   const seconds = (value) => Math.max(0, value);
@@ -252,7 +287,7 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
         fade: region.pitchlfo_fade ?? 0,
       }
       : null,
-    filter: filterPlan(region, velocity),
+    filter: filterPlan(region, key, velocity),
     eq: [1, 2, 3]
       .map((band) => ({
         frequency: region[`eq${band}_freq`] ?? [50, 500, 5000][band - 1],
@@ -269,9 +304,10 @@ const FILTER_TYPES = {
   bpf_1p: "bandpass", bpf_2p: "bandpass", brf_1p: "notch", brf_2p: "notch",
 };
 
-function filterPlan(region, velocity) {
+function filterPlan(region, key, velocity) {
   if (region.cutoff === undefined) return null;
-  const cents = (region.fil_veltrack ?? 0) * (velocity / 127);
+  const cents = (region.fil_veltrack ?? 0) * (velocity / 127)
+    + (key - (region.fil_keycenter ?? 60)) * (region.fil_keytrack ?? 0);
   return {
     type: FILTER_TYPES[region.fil_type ?? "lpf_2p"] ?? "lowpass",
     frequency: Math.min(20000, region.cutoff * 2 ** (cents / 1200)),
@@ -297,6 +333,16 @@ export function envelopeLevel({ delay, attack, hold, decay, sustain }, t) {
 /** The playback rate that raises a pitch by `cents`. */
 function centsRatio(cents) {
   return 2 ** (cents / 1200);
+}
+
+/** The controllers that move a voice while it sounds (see controlPlan). */
+function controlledBy(region) {
+  const numbers = new Set();
+  for (const opcode of Object.keys(region)) {
+    const match = /^(?:gain|volume|cutoff)_(?:on)?cc(\d+)$/.exec(opcode) ?? /^xf(?:in|out)_(?:lo|hi)cc(\d+)$/.exec(opcode);
+    if (match) numbers.add(match[1]);
+  }
+  return numbers;
 }
 
 /** A small, seeded random generator: the same piece renders the same every time. */
@@ -344,7 +390,9 @@ class SfzInstrument {
     this.rounds = new Map();
     this.files = null;
     this.disposed = false;
-    this.controllers = controllers;
+    this.startingControllers = controllers;
+    // The piece's controller moves, as they arrive: number → [{ time, value 0..127 }].
+    this.moves = new Map();
 
     this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url) : null)))
       .then(async ([sustain, short]) => {
@@ -370,7 +418,7 @@ class SfzInstrument {
       const match = /^set_cc(\d+)$/.exec(opcode);
       if (match) controllers[match[1]] = value;
     }
-    Object.assign(controllers, this.controllers);
+    Object.assign(controllers, this.startingControllers);
     const switches = file.regions.filter((r) => typeof r.sw_lokey === "number");
     return {
       ...file,
@@ -453,6 +501,51 @@ class SfzInstrument {
     return this.startRegions(file, attack, at).length;
   }
 
+  /** The controllers at `time`: the file's starting values, then the piece's moves. */
+  controllersAt(file, time) {
+    const controllers = { ...file.controllers };
+    for (const [number, moves] of this.moves) {
+      const last = moves.findLast((move) => move.time <= time);
+      if (last) controllers[number] = last.value;
+    }
+    return controllers;
+  }
+
+  /**
+   * A controller move from the piece (see io's controllerEvents). Notes that
+   * start later read it; notes sounding then follow it, if their regions say
+   * the controller moves them (see controlPlan).
+   *
+   * @param {number} controller - 0..127
+   * @param {number} value - 0..1
+   * @param {number} [time] - seconds
+   */
+  controllerChange(controller, value, time) {
+    const at = this.timeOf(time);
+    const number = String(controller);
+    const moves = this.moves.get(number) ?? [];
+    const index = moves.findIndex((move) => move.time > at);
+    moves.splice(index === -1 ? moves.length : index, 0, { time: at, value: Math.max(0, Math.min(1, value)) * 127 });
+    this.moves.set(number, moves);
+    for (const voice of this.voices) {
+      if (voice.controlledBy.has(number) && voice.start < at && at <= voice.endsAt) this.followControllers(voice, at, at);
+    }
+    return this;
+  }
+
+  /** Move a voice's controlled parameters to where the controllers are, at each move in [from, to]. */
+  followControllers(voice, from, to) {
+    const times = new Set();
+    for (const number of voice.controlledBy) {
+      for (const move of this.moves.get(number) ?? []) if (move.time >= from && move.time <= to) times.add(move.time);
+    }
+    for (const time of [...times].sort((a, b) => a - b)) {
+      const control = controlPlan(voice.region, this.controllersAt(voice.file, time));
+      voice.control.gain.linearRampToValueAtTime(control.gain, time);
+      voice.cutoff?.linearRampToValueAtTime(control.cutoffCents, time);
+    }
+  }
+
   startRegions(file, { key, velocity, trigger, round, cents = 0 }, at) {
     const random = this.random();
     // Legato: a note still sounds, or lets go just as this one starts, the
@@ -461,6 +554,7 @@ class SfzInstrument {
       && this.voices.some((v) => v.trigger !== "release" && v.start < at && v.releasedAt >= at);
     const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch };
     const started = [];
+    const controllers = this.controllersAt(file, at);
     for (const region of file.regions) {
       const weight = regionWeight(region, note);
       if (weight === 0) continue;
@@ -468,14 +562,14 @@ class SfzInstrument {
         key,
         velocity,
         weight,
-        controllers: file.controllers,
+        controllers,
         random: this.random,
         envelope: this.envelope,
         volume: this.volume,
       });
       plan.cents += cents;
       this.chokeGroup(plan.group, at);
-      started.push(this.startVoice(plan, key, velocity, at, file));
+      started.push(this.startVoice(plan, key, velocity, at, file, region, controllers));
     }
     return started;
   }
@@ -491,7 +585,7 @@ class SfzInstrument {
     }
   }
 
-  startVoice(plan, key, velocity, at, file) {
+  startVoice(plan, key, velocity, at, file, region, controllers) {
     const ctx = this.context;
     const buffer = this.buffers.get(plan.sample);
     const fileLoop = this.recordings.get(plan.sample).loop;
@@ -514,13 +608,17 @@ class SfzInstrument {
       }
     }
 
-    // source → filter → EQ → envelope → shape → pan → the track
+    // source → filter → EQ → envelope → shape → controllers → pan → the track
     const chain = [source];
+    const control = controlPlan(region, controllers);
+    let cutoff = null;
     if (plan.filter) {
       const filter = ctx.createBiquadFilter();
       filter.type = plan.filter.type;
       filter.frequency.value = plan.filter.frequency;
       filter.Q.value = plan.filter.Q;
+      filter.detune.value = control.cutoffCents;
+      cutoff = filter.detune;
       chain.push(filter);
     }
     for (const band of plan.eq) {
@@ -536,9 +634,11 @@ class SfzInstrument {
     // and a recording that begins mid-wave would click for a frame.
     envelopeGain.gain.value = 0;
     const shapeGain = ctx.createGain();
+    const controlGain = ctx.createGain();
+    controlGain.gain.value = control.gain;
     const panner = ctx.createStereoPanner();
     panner.pan.value = Math.max(-1, Math.min(1, plan.pan));
-    chain.push(envelopeGain, shapeGain, panner);
+    chain.push(envelopeGain, shapeGain, controlGain, panner);
     for (let k = 0; k + 1 < chain.length; k++) chain[k].connect(chain[k + 1]);
     panner.connect(this.output.input);
 
@@ -571,9 +671,12 @@ class SfzInstrument {
 
     source.start(start, Math.min(plan.offset / frameRate, buffer.duration));
     const voice = {
-      key, velocity, start, plan, file, source, rate, level, shape: shapeGain.gain, vibrato,
-      nodes: chain, oneShot: loopMode === "one_shot", releasedAt: Infinity,
+      key, velocity, start, plan, file, region, source, rate, level, shape: shapeGain.gain, vibrato,
+      control: controlGain, cutoff, controlledBy: controlledBy(region),
+      nodes: chain, oneShot: loopMode === "one_shot", releasedAt: Infinity, endsAt: Infinity,
     };
+    controlGain.gain.setValueAtTime(control.gain, start);
+    if (cutoff) cutoff.setValueAtTime(control.cutoffCents, start);
     source.onended = () => {
       for (const node of chain) node.disconnect();
       vibrato?.oscillator.stop();
@@ -598,7 +701,11 @@ class SfzInstrument {
     if (now < voice.start + env.delay + env.attack) voice.level.linearRampToValueAtTime(reached, now);
     else voice.level.setValueAtTime(reached, now);
     if (reached > 0) voice.level.exponentialRampToValueAtTime(reached * RELEASE_FLOOR, now + seconds);
-    voice.source.stop(now + (reached > 0 ? seconds : 0));
+    voice.endsAt = now + (reached > 0 ? seconds : 0);
+    voice.source.stop(voice.endsAt);
+    // The moves already known over the note's life (all of them, when a
+    // piece is rendered): the ones still to come arrive through controllerChange.
+    this.followControllers(voice, voice.start, voice.endsAt);
   }
 
   triggerRelease(notes, time) {

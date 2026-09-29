@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSfz, readWav, sfzKey } from "../src/sfz-parse.js";
-import { envelopeLevel, regionWeight, voicePlan } from "../src/sfz.js";
+import { controlPlan, envelopeLevel, regionWeight, voicePlan } from "../src/sfz.js";
 
 const sound = await import("../src/index.js");
 
@@ -114,16 +114,28 @@ test("a region is tuned from its key centre", () => {
   assert.equal(planFor({ pitch_keycenter: 60, tune: -5 }).cents, -5);
 });
 
-test("loudness adds the region's volume, the velocity curve and the controllers", () => {
+test("loudness adds the region's volume and the velocity curve", () => {
   assert.equal(planFor({}).gain, 1);
   assert.ok(Math.abs(planFor({ volume: -6 }).gain - 10 ** (-6 / 20)) < 1e-9);
   // velocity 64 of 127 is about -12 dB at full tracking, -7.2 dB at 60%
   const soft = (region) => 20 * Math.log10(planFor(region, { velocity: 64 }).gain);
   assert.ok(Math.abs(soft({}) - 40 * Math.log10(64 / 127)) < 1e-9);
   assert.ok(Math.abs(soft({ amp_veltrack: 60 }) - 0.6 * 40 * Math.log10(64 / 127)) < 1e-9);
+});
+
+test("the controllers set a voice's gain, its share of a layer crossfade, and its brightness", () => {
   // gain_cc1=34 with cc1 at 127 adds 34 dB
-  const loud = planFor({ gain_cc1: 34, volume: -34 }, { controllers: { 1: 127 } });
-  assert.ok(Math.abs(loud.gain - 1) < 1e-9);
+  assert.ok(Math.abs(controlPlan({ gain_cc1: 34 }, { 1: 127 }).gain - 10 ** (34 / 20)) < 1e-6);
+  assert.equal(controlPlan({ gain_cc1: 34 }, { 1: 0 }).gain, 1);
+  // the soft layer fades out and the loud one in as the mod wheel rises
+  const soft = { xfout_locc1: 32, xfout_hicc1: 96 };
+  const loud = { xfin_locc1: 32, xfin_hicc1: 96 };
+  assert.deepEqual([controlPlan(soft, { 1: 0 }).gain, controlPlan(loud, { 1: 0 }).gain], [1, 0]);
+  assert.deepEqual([controlPlan(soft, { 1: 127 }).gain, controlPlan(loud, { 1: 127 }).gain], [0, 1]);
+  assert.ok(Math.abs(controlPlan(soft, { 1: 64 }).gain - Math.SQRT1_2) < 1e-9, "half way: equal power");
+  assert.equal(controlPlan({ cutoff_cc1: 2400 }, { 1: 127 }).cutoffCents, 2400);
+  // and the envelope reads them as the note starts
+  assert.equal(planFor({ ampeg_attack: 0.1, ampeg_attackcc1: 1 }, { controllers: { 1: 127 } }).envelope.attack, 1.1);
 });
 
 test("the envelope follows the velocity, and a track's own envelope overrides it", () => {
@@ -180,7 +192,7 @@ function fakeContext() {
     },
     createGain: () => node("gain", ["gain"]),
     createStereoPanner: () => node("panner", ["pan"]),
-    createBiquadFilter: () => node("filter", ["frequency", "Q", "gain"]),
+    createBiquadFilter: () => node("filter", ["frequency", "Q", "gain", "detune"]),
     createOscillator: () => Object.assign(node("lfo", ["frequency"]), { start() {}, stop() {} }),
   };
   return context;
@@ -298,4 +310,32 @@ test("a release trigger sounds when the note ends, and a new note chokes it", as
   assert.equal(release.start, 1);
   node.triggerAttack(62, 1.5, 1);
   assert.equal(release.releasedAt, 1.5);
+});
+
+test("a sounding note follows the mod wheel, whether the moves come before the note or while it sounds", async () => {
+  serve({ "a.sfz": "<control> set_cc1=0 <region> sample=a.wav gain_cc1=20", "a.wav": "" });
+  const ramps = (context) => context.log
+    .filter(([name, method]) => name === "gain.gain" && method === "linearRampToValueAtTime")
+    .map(([, , value, time]) => [Math.round(20 * Math.log10(value)), time]);
+
+  // Rendering: every move is known before the notes are scheduled.
+  let context = fakeContext();
+  let node = sound.create({ sfz: "https://x/a.sfz" }, fakeTone(context)).node;
+  await node.loaded;
+  node.controllerChange(1, 1, 2);
+  node.controllerChange(1, 0.5, 3);
+  node.triggerAttack(60, 1, 1);
+  node.triggerRelease(60, 4);
+  assert.deepEqual(ramps(context).filter(([, t]) => t === 2 || t === 3), [[20, 2], [10, 3]]);
+
+  // Live: the moves arrive as the note sounds.
+  context = fakeContext();
+  node = sound.create({ sfz: "https://x/a.sfz" }, fakeTone(context)).node;
+  await node.loaded;
+  node.triggerAttack(60, 1, 1);
+  node.controllerChange(1, 1, 2);
+  node.triggerRelease(60, 4);
+  node.controllerChange(1, 0.5, 3);
+  node.controllerChange(1, 0, 9); // after the note: not its business
+  assert.deepEqual(ramps(context).filter(([, t]) => t >= 2), [[20, 2], [20, 2], [10, 3]]);
 });

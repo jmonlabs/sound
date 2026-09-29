@@ -154,3 +154,22 @@ test("an sf2 track with no engine named says so and is not built", () => {
     console.warn = warn;
   }
 });
+
+test("a piece's controller moves reach the channel as MIDI values", async () => {
+  sound.useSoundfont({ library, processor: "processor.js" });
+  try {
+    const node = sound.create({ sf2: "strings.sf2", program: 40 }, fakeTone()).node;
+    await node.loaded;
+    sent.length = 0;
+    node.controllerChange(1, 0.5, 2);
+    node.pitchBend(1, 3);
+    node.channelPressure(1, 4);
+    assert.deepEqual(sent, [
+      ["cc", node.channel, 1, 64, 2],
+      ["wheel", node.channel, Math.round(8192 + (2 / 12) * 8191), 3], // two semitones up
+      ["pressure", node.channel, 127, 4],
+    ]);
+  } finally {
+    sound.useSoundfont(null);
+  }
+});

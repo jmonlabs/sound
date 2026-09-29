@@ -143,6 +143,11 @@ async function startSynth(context, bank) {
   return synth;
 }
 
+/** A proportion as a 7-bit MIDI value. */
+function midiValue(value) {
+  return Math.max(0, Math.min(127, Math.round(value * 127)));
+}
+
 /**
  * One track's instrument: a MIDI channel of the shared synthesizer, shaped
  * like a Tone.js instrument for the host (connect, triggerAttack,
@@ -304,6 +309,39 @@ class SoundfontInstrument {
     if (arrival !== last) this.synth.pitchWheel(this.channel, arrival, { time: startTime + end });
     this.synth.pitchWheel(this.channel, 8192, { time: startTime + end + 0.05 });
     return true;
+  }
+
+  /**
+   * A controller move from the piece (see io's controllerEvents), sent to the
+   * channel as it is: the bank decides what it does (CC 1 vibrato or
+   * dynamics, CC 74 brightness…).
+   *
+   * @param {number} controller - 0..127
+   * @param {number} value - 0..1
+   * @param {number} [time] - seconds
+   */
+  controllerChange(controller, value, time) {
+    if (!this.synth) return this;
+    this.synth.controllerChange(this.channel, controller, midiValue(value), { time: this.timeOf(time) });
+    return this;
+  }
+
+  /**
+   * A pitch bend from the piece: -1..1 is two semitones either way, as the
+   * JMON schema defines it, whatever range the wheel has for glissandi.
+   */
+  pitchBend(value, time) {
+    if (!this.synth) return this;
+    const wheel = Math.round(8192 + Math.max(-1, Math.min(1, value)) * (2 / BEND_RANGE) * 8191);
+    this.synth.pitchWheel(this.channel, wheel, { time: this.timeOf(time) });
+    return this;
+  }
+
+  /** Channel pressure (aftertouch) from the piece, 0..1. */
+  channelPressure(value, time) {
+    if (!this.synth) return this;
+    this.synth.channelPressure(this.channel, midiValue(value), { time: this.timeOf(time) });
+    return this;
   }
 
   releaseAll() {
