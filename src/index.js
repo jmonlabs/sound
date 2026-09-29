@@ -29,6 +29,7 @@ import {
   GM_INSTRUMENTS,
   GM_SAMPLE_SECONDS,
   createGMInstrumentNode,
+  defaultEnvelope,
   findGMProgramByName,
   generateCompleteSamplerUrls,
   generateSamplerUrls,
@@ -156,7 +157,7 @@ export function create(spec, Tone) {
       asked.strategy,
     );
     return {
-      node: new Tone.Sampler({ urls, baseUrl: "", ...(asked.options || {}) }),
+      node: new Tone.Sampler({ urls, baseUrl: "", ...defaultEnvelope(asked.program), ...(asked.options || {}) }),
       isLoadable: true,
     };
   }
@@ -170,7 +171,9 @@ export function create(spec, Tone) {
     urls[midiToNoteName(parseInt(midi, 10))] = file;
   }
   return {
-    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl, ...(asked.options || {}) }),
+    // A drum hit is written short but rings on: without a release it stops
+    // 0.1 s after its written length.
+    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl, attack: 0, release: 1, ...(asked.options || {}) }),
     isLoadable: true,
   };
 }
@@ -230,8 +233,10 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
  * Move a sounding note's loudness through a curve, so a held string or wind
  * swells and eases off instead of sitting at one level.
  *
- * Replaces the note's whole gain path, attack and release included, so call
- * it after holdVoices: stopping a voice again cancels scheduled gain values.
+ * Replaces the note's whole gain path, attack and release included, and lets
+ * the note go at its end. Call it after triggerAttack and holdVoices, and skip
+ * triggerRelease when it returns true: stopping a voice again would cancel the
+ * curve, and triggerAttackRelease leaves no voice to find.
  *
  * @param {Object} node - The instrument, as returned by {@link create}
  * @param {number} midi - The note's MIDI number
@@ -289,6 +294,7 @@ export const sound = {
   setSoundfontSources,
   getSamplingStrategy,
   setSamplingStrategy,
+  defaultEnvelope,
   getSoundfontFormat,
   setSoundfontFormat,
 
@@ -311,6 +317,7 @@ export const sound = {
 
 export {
   analyseSustain,
+  defaultEnvelope,
   applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
   BANKS,

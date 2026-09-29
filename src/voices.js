@@ -82,18 +82,22 @@ export function applyPitchAnchorsToSampler(synth, midi, startTime, anchors, base
 }
 
 /**
- * Schedule a loudness curve on a Sampler's sounding voices.
+ * Schedule a loudness curve on a Sampler's sounding voices, and let them go.
  *
- * Each voice is a `ToneBufferSource` whose output gain Tone already automates:
- * a ramp from 0 to the velocity over the Sampler's `attack`, and a ramp to 0
- * over its `release` once the note is let go. A curve laid on top of that
- * would be undone by the release, which ramps from the level Tone computed
- * when it scheduled it — the velocity — so a note that had eased off would
- * jump back up before fading. The whole gain path is therefore replaced:
- * from 0, through the anchors, then down to 0 over `release` after the note.
+ * Each voice is a `ToneBufferSource` whose output gain Tone automates: a ramp
+ * from 0 to the velocity over the Sampler's `attack`, and a ramp to 0 over its
+ * `release` when the voice is stopped. Stopping a voice cancels whatever gain
+ * values were scheduled after its attack, so a curve can only survive if
+ * nothing stops the voice after it is laid.
  *
- * Call it last. Anything that stops the voice again afterwards (holdVoices,
- * a triggerRelease) cancels scheduled gain values and would erase the curve.
+ * This therefore does the letting go itself: it stops each voice at the note's
+ * end (which schedules the sound to end after the release), then replaces the
+ * whole gain path — from 0, through the anchors, to the level the curve has at
+ * the note's end, then down to 0 over `release` — and takes the voices off the
+ * Sampler's list of sounding notes, as `triggerRelease` would. A host calls it
+ * between `triggerAttack` and where it would have called `triggerRelease`, and
+ * skips the release when this returns true: `triggerAttackRelease` empties the
+ * list at once, so a voice would never be found.
  *
  * @param {Object} synth — a Tone.Sampler
  * @param {number} midi — the note's MIDI number, which keys `_activeSources`
@@ -106,7 +110,7 @@ export function applyPitchAnchorsToSampler(synth, midi, startTime, anchors, base
  * @param {number} [options.attack=0] — shortest time to the first anchor, so a
  *   curve that starts loud still does not click
  * @param {number} [options.release=0] — fade after the note, in seconds
- * @returns {boolean} whether any voice was reached
+ * @returns {boolean} whether any voice was reached (and so released)
  */
 export function applyAmplitudeAnchorsToSampler(synth, midi, startTime, anchors, options = {}) {
   if (!Array.isArray(anchors) || anchors.length === 0) return false;
@@ -130,11 +134,12 @@ export function applyAmplitudeAnchorsToSampler(synth, midi, startTime, anchors, 
     return anchors.at(-1).value;
   };
 
-  let applied = false;
+  const shaped = [];
   for (const source of sources) {
     const gain = source?._gainNode?.gain;
-    if (!gain || typeof gain.linearRampToValueAtTime !== "function") continue;
+    if (!gain || typeof gain.linearRampToValueAtTime !== "function" || typeof source.stop !== "function") continue;
 
+    source.stop(end);   // first: stopping later would cancel the curve
     gain.cancelScheduledValues(startTime);
     gain.setValueAtTime(0, startTime);
     let last = startTime;
@@ -147,9 +152,14 @@ export function applyAmplitudeAnchorsToSampler(synth, midi, startTime, anchors, 
     // The note's end, at the level the curve has reached there.
     gain.linearRampToValueAtTime(velocity * levelAt(seconds), end);
     gain.linearRampToValueAtTime(0, end + release);
-    applied = true;
+    shaped.push(source);
   }
-  return applied;
+  // Released, so no longer the Sampler's to stop: a later triggerRelease of
+  // the same pitch must not reach these voices and cancel their curve.
+  if (shaped.length > 0) {
+    synth._activeSources.set(Math.round(midi), sources.filter((source) => !shaped.includes(source)));
+  }
+  return shaped.length > 0;
 }
 
 /**

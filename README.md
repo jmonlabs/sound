@@ -157,6 +157,12 @@ Looping does not restore the sample's own release, since the end of the
 recording is never reached. The note ends on Tone's `release` fade, 0.1s by
 default:
 
+Every GM program starts and stops the way its family does unless its spec
+says otherwise: bowed strings enter over 0.08 s and fade over 1.2 s, a piano
+starts at once and rings for 1 s, a pad takes 0.3 s and fades over 2 s. The
+values are in `defaultEnvelope(program)`; a drum kit rings for 1 s after its
+written length. Override either on the track:
+
 ```js
 { gm: 48, options: { release: 0.6 } }   // longer tail
 { gm: 48, loopSustain: false }          // don't loop
@@ -182,7 +188,10 @@ shapeVoices(node, midi, startTime, anchors, options)  -> boolean
 `bendVoices` the value is cents from the written pitch; for `shapeVoices` it is
 a multiple of the note's velocity, and `options` is
 `{ seconds, velocity, attack, release }`. `shapeVoices` replaces the note's
-whole gain path, so a host calls it after `holdVoices`.
+whole gain path and lets the note go at its end, so a host calls it after
+`triggerAttack` and `holdVoices`, and skips `triggerRelease` when it returns
+true. Both need the voice still listed as sounding: `triggerAttackRelease`
+empties that list at once.
 
 Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 `getPopularInstruments`, `BANKS`, `getSoundfontBank`, `setSoundfontBank`,

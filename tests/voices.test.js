@@ -113,7 +113,10 @@ const fakeGain = () => {
     linearRampToValueAtTime: (v, t) => calls.push(["ramp", +v.toFixed(6), +t.toFixed(6)]),
   };
 };
-const fakeSampler = (gain) => ({ _activeSources: new Map([[60, [{ _gainNode: { gain } }]]]) });
+// A voice records its stop in the same log as its gain, so the order shows.
+const fakeSampler = (gain) => ({
+  _activeSources: new Map([[60, [{ _gainNode: { gain }, stop: (t) => gain.calls.push(["stop", t]) }]]]),
+});
 
 test("a loudness curve replaces the voice's whole gain path", async () => {
   const { applyAmplitudeAnchorsToSampler } = await import("../src/voices.js");
@@ -125,6 +128,7 @@ test("a loudness curve replaces the voice's whole gain path", async () => {
   );
   assert.equal(reached, true);
   assert.deepEqual(gain.calls, [
+    ["stop", 14],                   // let go at the end first: a later stop would cancel the curve
     ["cancel", 10],                 // Tone's attack and release are dropped
     ["set", 0, 10],
     ["ramp", 0.1, 10.1],            // the first anchor, no sooner than the attack
@@ -152,7 +156,19 @@ test("shapeVoices takes the instrument's own attack and release", async () => {
   const gain = fakeGain();
   const node = { ...fakeSampler(gain), attack: 0.3, release: 1.5, toSeconds: (v) => v };
   assert.equal(shapeVoices(node, 60, 0, [{ time: 0, value: 1 }], { seconds: 2, velocity: 1 }), true);
-  assert.deepEqual(gain.calls.slice(2), [["ramp", 1, 0.3], ["ramp", 1, 2], ["ramp", 0, 3.5]]);
+  assert.deepEqual(gain.calls.slice(3), [["ramp", 1, 0.3], ["ramp", 1, 2], ["ramp", 0, 3.5]]);
   assert.equal(shapeVoices({}, 60, 0, [{ time: 0, value: 1 }], { seconds: 1 }), false,
     "an instrument that is not a Sampler is left alone");
+});
+
+test("a shaped voice is taken off the sounding list, as triggerRelease would", async () => {
+  // Otherwise a later triggerRelease of the same pitch stops it again, and a
+  // stop cancels every gain value scheduled after the attack: the curve.
+  const { applyAmplitudeAnchorsToSampler } = await import("../src/voices.js");
+  const gain = fakeGain();
+  const synth = fakeSampler(gain);
+  applyAmplitudeAnchorsToSampler(synth, 60, 0, [{ time: 0, value: 1 }], { seconds: 1 });
+  assert.deepEqual(synth._activeSources.get(60), []);
+  assert.equal(applyAmplitudeAnchorsToSampler(synth, 60, 0, [{ time: 0, value: 1 }], { seconds: 1 }), false,
+    "and there is nothing left to shape");
 });

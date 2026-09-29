@@ -284,6 +284,52 @@ export function setSoundfontBank(bank) {
 
 let pendingProbe = null;
 
+/**
+ * How a GM instrument starts and stops when its spec does not say, by family.
+ *
+ * Without this, Tone's Sampler starts every note at once and cuts it 0.1 s
+ * after it is let go, which clips a cello or a harp as short as a hi-hat.
+ * `attack` is the seconds to reach the note's level; `release`, the seconds to
+ * fade once it is let go. A recording that has its own attack and decays by
+ * itself (piano, harp, anything plucked or struck) keeps an attack of 0 and a
+ * release long enough to ring; a held sound (bowed strings, ensembles, winds,
+ * pads) gets a soft attack and a release that overlaps the next note.
+ *
+ * A track overrides either with `options`: `{ gm: 42, options: { release: 3 } }`.
+ */
+const ENVELOPES = [
+  // first and last program, attack, release
+  [0, 7, 0, 1],          // pianos
+  [8, 15, 0, 1.5],       // chromatic percussion: celesta, vibraphone, bells…
+  [16, 23, 0.02, 0.4],   // organs
+  [24, 31, 0, 0.8],      // guitars
+  [32, 39, 0, 0.4],      // basses
+  [40, 44, 0.08, 1.2],   // bowed strings: violin, viola, cello, contrabass, tremolo
+  [45, 47, 0, 1.2],      // pizzicato, harp, timpani
+  [48, 54, 0.15, 1.6],   // string ensembles and choirs
+  [55, 55, 0, 0.8],      // orchestra hit
+  [56, 63, 0.04, 0.5],   // brass
+  [64, 71, 0.04, 0.4],   // reeds
+  [72, 79, 0.05, 0.4],   // pipes and flutes
+  [80, 87, 0.01, 0.3],   // synth leads
+  [88, 95, 0.3, 2],      // synth pads
+  [96, 103, 0.1, 1.5],   // synth effects
+  [104, 108, 0, 0.8],    // plucked: sitar, banjo, shamisen, koto, kalimba
+  [109, 111, 0.04, 0.5], // bagpipe, fiddle, shanai
+  [112, 119, 0, 0.6],    // percussive
+  [120, 127, 0.01, 0.5], // sound effects
+];
+
+/**
+ * The attack and release a GM program gets when its spec does not set them.
+ * @param {number} program - GM program number (0-127)
+ * @returns {{attack: number, release: number}} Seconds
+ */
+export function defaultEnvelope(program) {
+  const row = ENVELOPES.find(([first, last]) => program >= first && program <= last);
+  return row ? { attack: row[2], release: row[3] } : { attack: 0, release: 1 };
+}
+
 const STRATEGIES = ["minimal", "balanced", "quality", "complete"];
 let activeStrategy = "balanced";
 

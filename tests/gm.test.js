@@ -447,3 +447,15 @@ test("the built-in drum kits can come from a local copy", async () => {
   }
   assert.equal(drumKits.acoustic.baseUrl, "https://tonejs.github.io/audio/drum-samples/acoustic-kit/");
 });
+
+test("an instrument starts and stops the way its family does, unless the track says", async () => {
+  const { create, defaultEnvelope } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  const cello = create({ gm: 42 }, { Sampler }).node.options;
+  assert.equal(cello.attack, 0.08, "a bowed string enters softly");
+  assert.equal(cello.release, 1.2, "and fades instead of stopping 0.1 s after it is let go");
+  assert.deepEqual(defaultEnvelope(0), { attack: 0, release: 1 }, "a piano has its own attack, and rings");
+  assert.equal(create({ gm: 42, options: { release: 3 } }, { Sampler }).node.options.release, 3,
+    "the track's own value wins");
+  assert.equal(create("drumkit:acoustic", { Sampler }).node.options.release, 1, "a drum hit rings on");
+});
