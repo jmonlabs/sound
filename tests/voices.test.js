@@ -172,3 +172,40 @@ test("a shaped voice is taken off the sounding list, as triggerRelease would", a
   assert.equal(applyAmplitudeAnchorsToSampler(synth, 60, 0, [{ time: 0, value: 1 }], { seconds: 1 }), false,
     "and there is nothing left to shape");
 });
+
+/* --- ready before the first note ----------------------------------------- */
+
+const sustaining = (length = 20000) => {
+  const data = new Float32Array(length);
+  for (let i = 0; i < length; i++) data[i] = Math.sin(i * 0.05) * (1 - 0.7 * (i / length));
+  return { duration: 2, length, numberOfChannels: 1, getChannelData: () => data };
+};
+
+test("a Sampler's recordings are made ready to loop when they load, not when a note plays", async () => {
+  // An edit to a buffer is not heard by a voice already playing it: the
+  // Web Audio API copies the contents when a source starts. Edited from
+  // holdVoices, the first loop of every note clicked.
+  const { prepareSamplerLoops, analyseSustain } = await import("../src/voices.js");
+  const buffers = new Map([["60", sustaining()], ["64", sustaining()]]);
+  assert.equal(prepareSamplerLoops({ _buffers: { _buffers: buffers } }), 2);
+  for (const buffer of buffers.values()) assert.equal(analyseSustain(buffer).prepared, true);
+  assert.equal(prepareSamplerLoops({}), 0, "a synth that is not a Sampler is left alone");
+});
+
+test("the provider prepares a GM instrument's loops on load, and still calls the track's onload", async () => {
+  const { create } = await import("../src/index.js");
+  const { analyseSustain } = await import("../src/voices.js");
+  const buffer = sustaining();
+  let trackLoaded = false;
+  class Sampler {
+    constructor(options) {
+      this.options = options;
+      this._buffers = { _buffers: new Map([["60", buffer]]) };
+      queueMicrotask(options.onload);
+    }
+  }
+  create({ gm: 42, options: { onload: () => { trackLoaded = true; } } }, { Sampler });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(analyseSustain(buffer).prepared, true);
+  assert.equal(trackLoaded, true);
+});

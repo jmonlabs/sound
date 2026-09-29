@@ -293,6 +293,30 @@ export function prepareLoopRegion(buffer, analysis) {
 }
 
 /**
+ * Get every sustaining recording of a Sampler ready to loop, as soon as the
+ * recordings have loaded and before any note plays them.
+ *
+ * The loop join is smoothed by editing the recording (prepareLoopRegion). An
+ * edit made once a voice has started is not heard: the Web Audio API takes
+ * its own copy of a buffer's contents when a source starts, so the first
+ * notes to loop, and every voice already sounding, clicked at the loop point.
+ * Preparing at load time means every voice plays the edited recording.
+ *
+ * @param {Object} synth — a Tone.Sampler, once loaded
+ * @param {Object} [options] — passed to analyseSustain
+ * @returns {number} how many recordings were made ready to loop
+ */
+export function prepareSamplerLoops(synth, options = {}) {
+  const buffers = synth?._buffers?._buffers;
+  if (!(buffers instanceof Map)) return 0;
+  let prepared = 0;
+  for (const buffer of buffers.values()) {
+    if (prepareLoopRegion(buffer, analyseSustain(buffer, options))) prepared++;
+  }
+  return prepared;
+}
+
+/**
  * Hold a sampled note for as long as it is written, by looping the sample's
  * sustaining region.
  *

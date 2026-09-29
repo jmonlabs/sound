@@ -62,6 +62,7 @@ import {
   applyPitchAnchorsToSampler,
   canResample,
   prepareLoopRegion,
+  prepareSamplerLoops,
   sustainSampledNote,
 } from "./voices.js";
 
@@ -156,10 +157,20 @@ export function create(spec, Tone) {
       asked.noteRange,
       asked.strategy,
     );
-    return {
-      node: new Tone.Sampler({ urls, baseUrl: "", ...defaultEnvelope(asked.program), ...(asked.options || {}) }),
-      isLoadable: true,
-    };
+    const options = asked.options || {};
+    // The loop joins are smoothed as soon as the recordings load: an edit
+    // made once a note has started is not heard (see prepareSamplerLoops).
+    const node = new Tone.Sampler({
+      urls,
+      baseUrl: "",
+      ...defaultEnvelope(asked.program),
+      ...options,
+      onload: () => {
+        prepareSamplerLoops(node);
+        options.onload?.();
+      },
+    });
+    return { node, isLoadable: true };
   }
 
   if (!asked.kit) {
@@ -312,6 +323,7 @@ export const sound = {
   // The analysis behind holdVoices, exposed because it is the interesting part.
   analyseSustain,
   prepareLoopRegion,
+  prepareSamplerLoops,
   canResample,
 };
 
@@ -341,6 +353,7 @@ export {
   gmMaxBeats,
   parseDrumKitSpec,
   prepareLoopRegion,
+  prepareSamplerLoops,
   registerDrumKit,
   resolveSoundfontBase,
   setDrumKitSource,
