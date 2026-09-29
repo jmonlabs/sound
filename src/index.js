@@ -63,6 +63,8 @@ import {
   useSoundfont,
 } from "./soundfont.js";
 
+import { createSfzInstrument } from "./sfz.js";
+
 import {
   analyseSustain,
   applyAmplitudeAnchorsToSampler,
@@ -86,12 +88,13 @@ function midiToNoteName(midi) {
  * Read a track's `synth` spec and say what sampled instrument it asks for.
  *
  * Recognised: a General MIDI program number, `{ gm }` or `{ program }` with
- * the sampling options beside it, and a drum kit name. Anything else — a Tone
+ * the sampling options beside it, a drum kit name, and `{ sfz }`, an SFZ
+ * instrument (see sfz.js). Anything else — a Tone
  * class name, an inline `{ type, options }` — is not this package's business,
  * so it returns `null` and the caller builds it itself.
  *
  * @param {*} spec - A track's `synth`, after any preset has been expanded
- * @returns {{kind: 'gm'|'drumkit', ...}|null}
+ * @returns {{kind: 'gm'|'drumkit'|'sfz', ...}|null}
  */
 export function readSpec(spec) {
   if (typeof spec === "number") return { kind: "gm", program: spec };
@@ -102,6 +105,18 @@ export function readSpec(spec) {
   }
 
   if (spec && typeof spec === "object") {
+    if (typeof spec.sfz === "string") {
+      return {
+        kind: "sfz",
+        sfz: spec.sfz,
+        staccato: spec.staccato,
+        staccatoUnder: spec.staccatoUnder,
+        envelope: spec.envelope,
+        volume: spec.volume,
+        controllers: spec.controllers,
+      };
+    }
+
     // `{ kit: "name" }` is the object form of `"drumkit:name"`, so a sample
     // set can carry options the string form has no room for. Any registered
     // kit works, not only drums: one file per key is also how you play a set
@@ -158,6 +173,11 @@ function bankBase(bank) {
 export function create(spec, Tone) {
   const asked = readSpec(spec);
   if (!asked || !Tone?.Sampler) return null;
+
+  if (asked.kind === "sfz") {
+    const { kind, ...options } = asked;
+    return { node: createSfzInstrument(Tone, options), isLoadable: true };
+  }
 
   if (asked.kind === "gm") {
     // With a SoundFont bank in use, the bank plays it (see soundfont.js),
@@ -233,7 +253,7 @@ export async function prepare(specs) {
  * @returns {boolean} Whether any voice was reached
  */
 export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {
-  if (node?.isSoundfont) return node.bend(midi, startTime, anchors, baseCents);
+  if (node?.isSoundfont || node?.isSfz) return node.bend(midi, startTime, anchors, baseCents);
   if (!canResample(node)) return false;
   return applyPitchAnchorsToSampler(node, midi, startTime, anchors, baseCents);
 }
@@ -273,7 +293,7 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
  * @returns {boolean} Whether any voice was reached
  */
 export function shapeVoices(node, midi, startTime, anchors, options = {}) {
-  if (node?.isSoundfont) return node.shape(midi, startTime, anchors, options);
+  if (node?.isSoundfont || node?.isSfz) return node.shape(midi, startTime, anchors, options);
   if (!canResample(node)) return false;
   const seconds = (value) => (typeof node.toSeconds === "function" ? node.toSeconds(value) : Number(value) || 0);
   return applyAmplitudeAnchorsToSampler(node, midi, startTime, anchors, {
@@ -286,14 +306,15 @@ export function shapeVoices(node, midi, startTime, anchors, options = {}) {
 /**
  * Whether a host should play this instrument's notes as a separate attack and
  * release, and give the provider the note in between (holdVoices,
- * shapeVoices): a Sampler, whose voices can be held and shaped, or a
- * SoundFont instrument, whose loudness curves become CC 11.
+ * shapeVoices): a Sampler, whose voices can be held and shaped, a SoundFont
+ * instrument, whose loudness curves become CC 11, or an SFZ instrument, whose
+ * notes are voices of their own.
  *
  * @param {Object} node - The instrument, as returned by {@link create}
  * @returns {boolean}
  */
 export function handlesVoices(node) {
-  return canResample(node) || node?.isSoundfont === true;
+  return canResample(node) || node?.isSoundfont === true || node?.isSfz === true;
 }
 
 /**
