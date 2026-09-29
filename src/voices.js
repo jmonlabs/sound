@@ -208,9 +208,13 @@ export function analyseSustain(buffer, options = {}) {
   const loops = peak > 0 && tail / peak >= threshold;
 
   // Loop the steady part: past the attack, short of the very end, where an
-  // encoder's fade-out lives. Both ends land on a rising zero crossing.
+  // encoder's fade-out lives. The loop starts on a rising zero crossing and
+  // ends where the recording repeats what follows its start; failing that,
+  // on a zero crossing near the end.
   const from = zeroCrossingNear(data, Math.floor(data.length * 0.45), Math.floor(data.length * 0.50));
-  const to = zeroCrossingNear(data, Math.floor(data.length * 0.90), Math.floor(data.length * 0.95));
+  const last = Math.floor(data.length * 0.95);
+  const to = repeatEnd(data, from, last, rate)
+    ?? zeroCrossingNear(data, Math.floor(data.length * 0.90), last);
 
   const analysis = {
     loops: loops && to > from,
@@ -370,6 +374,67 @@ function rms(data, from, to) {
 }
 
 /** First rising zero crossing at or after `index`, giving up at `limit`. */
+/**
+ * Where to end a loop that starts at `from`: the furthest point, before
+ * `limit`, where the recording repeats what follows `from`.
+ *
+ * A soundfont rendered to audio still carries the soundfont's own loop, so
+ * its steady part repeats almost exactly at a fixed interval — every 0.166 s
+ * for FluidR3's violin, with its vibrato. A loop whose length is a multiple of
+ * that interval joins seamlessly. One of arbitrary length joins two different
+ * moments of the vibrato, which no crossfade hides: the loop breaks audibly on
+ * every turn.
+ *
+ * The search is coarse first, on 16-sample block averages, then exact to the
+ * sample around the best lag, so that preparing a whole instrument on load
+ * stays cheap. Returns null when nothing repeats closely enough (a recording
+ * with no loop of its own), and the caller falls back to a fixed end.
+ */
+function repeatEnd(data, from, limit, rate) {
+  const step = 16;
+  const window = Math.round(rate * 0.04);
+  const minLag = Math.round(rate * 0.05);
+  const maxLag = limit - from - window;
+  if (maxLag <= minLag) return null;
+
+  const blocks = new Float64Array(Math.floor((maxLag + window) / step));
+  for (let k = 0; k < blocks.length; k++) {
+    let sum = 0;
+    for (let i = 0; i < step; i++) sum += data[from + k * step + i];
+    blocks[k] = sum / step;
+  }
+  const coarseWindow = Math.floor(window / step);
+  const scores = [];
+  for (let lag = Math.ceil(minLag / step); lag + coarseWindow < blocks.length; lag++) {
+    scores.push([lag, similarity(blocks, 0, lag, coarseWindow)]);
+  }
+  const best = Math.max(...scores.map(([, score]) => score));
+  if (!(best >= 0.9)) return null;
+  // The longest lag that repeats about as well as the best: fewer turns.
+  const coarse = Math.max(...scores.filter(([, score]) => score >= best - 0.01).map(([lag]) => lag));
+
+  let exact = coarse * step;
+  let exactScore = -1;
+  for (let lag = coarse * step - step; lag <= Math.min(coarse * step + step, maxLag); lag++) {
+    const score = similarity(data, from, from + lag, window);
+    if (score > exactScore) [exact, exactScore] = [lag, score];
+  }
+  return exactScore >= 0.9 ? from + exact : null;
+}
+
+/** Normalised correlation of two windows of the same signal: 1 when identical. */
+function similarity(data, a, b, length) {
+  let cross = 0;
+  let energyA = 0;
+  let energyB = 0;
+  for (let i = 0; i < length; i++) {
+    cross += data[a + i] * data[b + i];
+    energyA += data[a + i] * data[a + i];
+    energyB += data[b + i] * data[b + i];
+  }
+  return cross / Math.sqrt(energyA * energyB || 1);
+}
+
 function zeroCrossingNear(data, index, limit) {
   const end = Math.min(data.length - 1, limit);
   for (let i = Math.max(1, index); i < end; i++) {

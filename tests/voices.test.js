@@ -209,3 +209,25 @@ test("the provider prepares a GM instrument's loops on load, and still calls the
   assert.equal(analyseSustain(buffer).prepared, true);
   assert.equal(trackLoaded, true);
 });
+
+/* --- a loop that joins the recording to itself ---------------------------- */
+
+test("a loop lasts a whole number of the recording's own repetitions", async () => {
+  // A soundfont rendered to audio still carries its loop: here a tone with a
+  // 5 Hz vibrato, which repeats exactly every 0.2 s. A loop of arbitrary
+  // length would join two different points of the vibrato — an audible break
+  // on every turn, which is what FluidR3's strings did.
+  const { analyseSustain } = await import("../src/voices.js");
+  const rate = 8000;
+  const length = rate * 3;
+  const data = new Float32Array(length);
+  for (let i = 0; i < length; i++) {
+    const t = i / rate;
+    data[i] = Math.sin(2 * Math.PI * 440 * t + 3 * Math.sin(2 * Math.PI * 5 * t));
+  }
+  const analysis = analyseSustain({ duration: 3, length, numberOfChannels: 1, getChannelData: () => data });
+  const loop = analysis.endSample - analysis.startSample;
+  const turns = loop / (0.2 * rate);
+  assert.ok(Math.abs(turns - Math.round(turns)) < 0.01, `a loop of ${loop} samples is ${turns.toFixed(3)} vibrato periods`);
+  assert.ok(turns >= 5, "and as long as the recording allows, so it repeats less often");
+});
