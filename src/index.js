@@ -57,6 +57,13 @@ import {
 } from "./drumkits.js";
 
 import {
+  createSoundfontInstrument,
+  defaultSoundfontAttack,
+  soundfontInUse,
+  useSoundfont,
+} from "./soundfont.js";
+
+import {
   analyseSustain,
   applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
@@ -117,6 +124,8 @@ export function readSpec(spec) {
       // has to know banks exist. An explicit baseUrl still wins.
       baseUrl: spec.baseUrl || (spec.bank ? bankBase(spec.bank) : undefined),
       options: spec.options,
+      soundfont: spec.soundfont,
+      controllers: spec.controllers,
     };
   }
 
@@ -151,6 +160,12 @@ export function create(spec, Tone) {
   if (!asked || !Tone?.Sampler) return null;
 
   if (asked.kind === "gm") {
+    // With a SoundFont bank in use, the bank plays it (see soundfont.js),
+    // unless the track says `soundfont: false` or no channel is left.
+    if (soundfontInUse() && asked.soundfont !== false) {
+      const node = createSoundfontInstrument(Tone, asked.program, asked.controllers);
+      if (node) return { node, isLoadable: true };
+    }
     const urls = generateSamplerUrls(
       asked.program,
       asked.baseUrl,
@@ -257,6 +272,7 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
  * @returns {boolean} Whether any voice was reached
  */
 export function shapeVoices(node, midi, startTime, anchors, options = {}) {
+  if (node?.isSoundfont) return node.shape(midi, startTime, anchors, options);
   if (!canResample(node)) return false;
   const seconds = (value) => (typeof node.toSeconds === "function" ? node.toSeconds(value) : Number(value) || 0);
   return applyAmplitudeAnchorsToSampler(node, midi, startTime, anchors, {
@@ -264,6 +280,19 @@ export function shapeVoices(node, midi, startTime, anchors, options = {}) {
     attack: options.attack ?? seconds(node.attack),
     release: options.release ?? seconds(node.release),
   });
+}
+
+/**
+ * Whether a host should play this instrument's notes as a separate attack and
+ * release, and give the provider the note in between (holdVoices,
+ * shapeVoices): a Sampler, whose voices can be held and shaped, or a
+ * SoundFont instrument, whose loudness curves become CC 11.
+ *
+ * @param {Object} node - The instrument, as returned by {@link create}
+ * @returns {boolean}
+ */
+export function handlesVoices(node) {
+  return canResample(node) || node?.isSoundfont === true;
 }
 
 /**
@@ -282,7 +311,13 @@ export const sound = {
   bendVoices,
   holdVoices,
   shapeVoices,
+  handlesVoices,
   readSpec,
+
+  // A SoundFont bank played by a real engine instead of the midi-js files.
+  useSoundfont,
+  soundfontInUse,
+  defaultSoundfontAttack,
 
   // General MIDI.
   GM_INSTRUMENTS,
@@ -328,6 +363,9 @@ export const sound = {
 export {
   analyseSustain,
   defaultEnvelope,
+  defaultSoundfontAttack,
+  soundfontInUse,
+  useSoundfont,
   applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
   BANKS,
