@@ -46,6 +46,7 @@ test("with a bank in use, a GM program becomes a channel of the SoundFont synthe
     assert.deepEqual(sent.filter((m) => m[0] !== "bank"), [
       ["connect", 0, "gain"],
       ["program", 0, 40],
+      ["range", 0, 12], // room for an octave's glissando either way
       ["cc", 0, 91, 0, undefined], // dry: the piece's reverb does the room
       ["cc", 0, 93, 0, undefined],
       ["cc", 0, 73, 100, undefined], // a bowed string starts a little softer
@@ -99,4 +100,22 @@ test("without a bank, GM programs are Samplers as before", () => {
   const { node } = sound.create({ gm: 40 }, fakeTone());
   assert.equal(node.isSoundfont, undefined);
   assert.ok(node.options.urls, "a Sampler with its sample URLs");
+});
+
+test("a pitch curve becomes the channel's pitch wheel, back to the centre after it", async () => {
+  sound.useSoundfont({ bank: "bank.sf3", library, processor: "processor.js" });
+  try {
+    const node = sound.create({ gm: 40 }, fakeTone()).node;
+    await node.loaded;
+    sent.length = 0;
+    // A glissando up a fifth over one second.
+    assert.equal(sound.bendVoices(node, 60, 5, [{ time: 0, value: 0 }, { time: 1, value: 700 }]), true);
+    const wheel = sent.filter((m) => m[0] === "wheel");
+    assert.deepEqual(wheel[0], ["wheel", 0, 8192, 5], "it starts at the written pitch");
+    const top = Math.max(...wheel.map((m) => m[2]));
+    assert.equal(top, Math.round(8192 + (7 / 12) * 8192), "and reaches a fifth up, on a range of an octave");
+    assert.deepEqual(wheel.at(-1), ["wheel", 0, 8192, 6.05], "then returns to the centre");
+  } finally {
+    sound.useSoundfont(null);
+  }
 });

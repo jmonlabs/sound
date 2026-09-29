@@ -25,6 +25,9 @@ let bankBytes = null;
 /** Shared synthesizers, per Tone context: { ready: Promise<synth>, channels: Set<number> }. */
 const shared = new WeakMap();
 
+/** Semitones the pitch wheel covers either way. */
+const BEND_RANGE = 12;
+
 /** Channel 9 is General MIDI's drum channel; outputs beyond 16 wrap around. */
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
 
@@ -128,6 +131,8 @@ class SoundfontInstrument {
       this.synth = synth;
       synth.connectChannel(this.output.input, channel);
       synth.programChange(channel, program);
+      // Room for a glissando of an octave either way (see bend).
+      synth.pitchWheelRange(channel, BEND_RANGE);
       // Dry: the track's bus and the piece's reverb do the room.
       synth.controllerChange(channel, 91, 0);
       synth.controllerChange(channel, 93, 0);
@@ -224,6 +229,45 @@ class SoundfontInstrument {
       last = value;
     }
     this.synth.noteOff(this.channel, midi, { time: startTime + seconds });
+    return true;
+  }
+
+  /**
+   * A note's pitch curve (glissando, portamento, bend, pitch envelope) as the
+   * channel's pitch wheel, every 20 ms, back to the centre just after the
+   * curve. The wheel is the channel's: two overlapping notes on one track bend
+   * together, which a monophonic line never does.
+   *
+   * @param {number} midi - unused: the channel bends as a whole
+   * @param {number} startTime - seconds
+   * @param {Array<{time:number,value:number}>} anchors - seconds from the
+   *   start, cents from the written pitch
+   * @param {number} [baseCents=0] - a constant offset (microtuning)
+   * @returns {boolean} true: the note bends
+   */
+  bend(midi, startTime, anchors, baseCents = 0) {
+    if (!this.synth || !Array.isArray(anchors) || anchors.length === 0) return false;
+    const wheel = (cents) => Math.max(0, Math.min(16383, Math.round(8192 + ((baseCents + cents) / 100 / BEND_RANGE) * 8192)));
+    const centsAt = (t) => {
+      if (t <= anchors[0].time) return anchors[0].value;
+      for (let k = 1; k < anchors.length; k++) {
+        const a = anchors[k - 1];
+        const b = anchors[k];
+        if (t <= b.time) return a.value + (b.value - a.value) * ((t - a.time) / (b.time - a.time || 1));
+      }
+      return anchors.at(-1).value;
+    };
+    const end = anchors.at(-1).time;
+    let last = -1;
+    for (let t = Math.max(0, anchors[0].time); t <= end; t += 0.02) {
+      const value = wheel(centsAt(t));
+      if (value !== last) this.synth.pitchWheel(this.channel, value, { time: startTime + t });
+      last = value;
+    }
+    // The arrival itself: steps of 20 ms need not land on the curve's end.
+    const arrival = wheel(centsAt(end));
+    if (arrival !== last) this.synth.pitchWheel(this.channel, arrival, { time: startTime + end });
+    this.synth.pitchWheel(this.channel, 8192, { time: startTime + end + 0.05 });
     return true;
   }
 

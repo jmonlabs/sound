@@ -233,6 +233,7 @@ export async function prepare(specs) {
  * @returns {boolean} Whether any voice was reached
  */
 export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {
+  if (node?.isSoundfont) return node.bend(midi, startTime, anchors, baseCents);
   if (!canResample(node)) return false;
   return applyPitchAnchorsToSampler(node, midi, startTime, anchors, baseCents);
 }

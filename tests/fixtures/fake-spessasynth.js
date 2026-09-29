@@ -13,4 +13,6 @@ export class WorkletSynthesizer {
   controllerChange(channel, cc, value, options) { sent.push(["cc", channel, cc, value, options?.time]); }
   noteOn(channel, midi, velocity, options) { sent.push(["on", channel, midi, velocity, options?.time]); }
   noteOff(channel, midi, options) { sent.push(["off", channel, midi, options?.time]); }
+  pitchWheel(channel, value, options) { sent.push(["wheel", channel, value, options?.time]); }
+  pitchWheelRange(channel, range) { sent.push(["range", channel, range]); }
 }
