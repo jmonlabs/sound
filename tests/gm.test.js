@@ -457,5 +457,6 @@ test("an instrument starts and stops the way its family does, unless the track s
   assert.deepEqual(defaultEnvelope(0), { attack: 0, release: 1 }, "a piano has its own attack, and rings");
   assert.equal(create({ gm: 42, options: { release: 3 } }, { Sampler }).node.options.release, 3,
     "the track's own value wins");
-  assert.equal(create("drumkit:acoustic", { Sampler }).node.options.release, 1, "a drum hit rings on");
+  assert.equal(create("drumkit:acoustic", { Sampler }).node.options.release, undefined,
+    "a drum kit keeps Tone's own short release: a written hit is already as long as it should sound");
 });

@@ -182,9 +182,7 @@ export function create(spec, Tone) {
     urls[midiToNoteName(parseInt(midi, 10))] = file;
   }
   return {
-    // A drum hit is written short but rings on: without a release it stops
-    // 0.1 s after its written length.
-    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl, attack: 0, release: 1, ...(asked.options || {}) }),
+    node: new Tone.Sampler({ urls, baseUrl: asked.kit.baseUrl, ...(asked.options || {}) }),
     isLoadable: true,
   };
 }

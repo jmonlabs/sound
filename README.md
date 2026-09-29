@@ -160,8 +160,8 @@ default:
 Every GM program starts and stops the way its family does unless its spec
 says otherwise: bowed strings enter over 0.06 s and fade over 0.4 s, a piano
 starts at once and rings for 1 s, a pad takes 0.3 s and fades over 2 s. The
-values are in `defaultEnvelope(program)`; a drum kit rings for 1 s after its
-written length. Override either on the track:
+values are in `defaultEnvelope(program)`. Drum kits keep Tone's own short
+release. Override either on the track:
 
 ```js
 { gm: 48, options: { release: 0.6 } }   // longer tail
