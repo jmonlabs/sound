@@ -293,7 +293,9 @@ let pendingProbe = null;
  * fade once it is let go. A recording that has its own attack and decays by
  * itself (piano, harp, anything plucked or struck) keeps an attack of 0 and a
  * release long enough to ring; a held sound (bowed strings, ensembles, winds,
- * pads) gets a soft attack and a release that overlaps the next note.
+ * pads) gets a soft attack and a short release: a bowed string stops soon
+ * after the bow leaves it, and what rings on is the room, which is the
+ * reverb's job. A long release makes consecutive notes pile up.
  *
  * A track overrides either with `options`: `{ gm: 42, options: { release: 3 } }`.
  */
@@ -304,9 +306,9 @@ const ENVELOPES = [
   [16, 23, 0.02, 0.4],   // organs
   [24, 31, 0, 0.8],      // guitars
   [32, 39, 0, 0.4],      // basses
-  [40, 44, 0.08, 1.2],   // bowed strings: violin, viola, cello, contrabass, tremolo
+  [40, 44, 0.06, 0.4],   // bowed strings: violin, viola, cello, contrabass, tremolo
   [45, 47, 0, 1.2],      // pizzicato, harp, timpani
-  [48, 54, 0.15, 1.6],   // string ensembles and choirs
+  [48, 54, 0.12, 0.8],   // string ensembles and choirs
   [55, 55, 0, 0.8],      // orchestra hit
   [56, 63, 0.04, 0.5],   // brass
   [64, 71, 0.04, 0.4],   // reeds
