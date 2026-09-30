@@ -171,6 +171,81 @@ release. Override either on the track:
 Both reach into `Tone.Sampler._activeSources`, which is internal, so both are
 feature-detected and return `false` if a future version moves it.
 
+## SoundFont banks
+
+`.sf2`, `.sf3` and `.dls` banks are played by
+[spessasynth](https://github.com/spessasus/spessasynth_lib) (Apache-2.0), an
+AudioWorklet in Tone's own context. Say once where it is, and optionally which
+bank plays General MIDI programs:
+
+```js
+sound.useSoundfont({
+  library: "/vendor/spessasynth/spessasynth_lib.js",
+  processor: "/vendor/spessasynth/spessasynth_processor.min.js",
+  bank: "/samples/soundfonts/MuseScore_General.sf3", // optional: { gm } tracks
+});
+
+{ gm: 40 }                                        // violin, from the bank above
+{ sf2: "/samples/soundfonts/GeneralUser-GS.sf2", program: 0 }  // any bank, per track
+{ sf2: "/samples/soundfonts/MuseScore_General.sf3", program: 40, bankSelect: 8 } // a variation
+```
+
+Each bank file gets a synthesizer of its own, with its own bank numbers and 15
+channels (channel 9, General MIDI's drums, is left out). A track is one channel:
+its loudness curve is the channel's expression (CC 11), and its pitch curve the
+channel's pitch wheel, so two overlapping notes on one track swell and bend
+together. `controllers` sets any controller at the start, e.g. `{ 73: 100 }` for
+a softer attack; `{ gm }` tracks of bowed strings get that one by default.
+
+## SFZ instruments
+
+An [SFZ](https://sfzformat.com) instrument is a text file and a folder of
+recordings: which recording answers which key and velocity, how it is tuned,
+how loud it is, how it starts and ends. The free orchestral libraries worth
+hearing are in this format, for instance
+[Virtual Playing Orchestra](https://virtualplaying.com/virtual-playing-orchestra/)
+and [VCSL](https://github.com/sgossner/VCSL).
+
+```js
+const strings = "/samples/sfz/virtual-playing-orchestra-3/Strings";
+{ label: "Cello", synth: {
+  sfz: `${strings}/cello-SOLO-sustain.sfz`,       // every note
+  staccato: `${strings}/cello-SOLO-staccato.sfz`, // notes shorter than staccatoUnder
+  staccatoUnder: 0.3,                             // seconds, the default
+  envelope: { attack: 0.2, release: 1 },          // over the file's own, optional
+  volume: -15,                                    // dB
+} }
+```
+
+Every note is a voice of its own, so a loudness curve (`shapeVoices`) or a
+bend (`bendVoices`) moves that note only, not the whole track. The file's
+velocity layers and crossfades, round robins, key switches, release triggers
+(the bow leaving the string), choke groups, envelope, pitch LFO, filter and EQ
+are played; `sfz.js` lists the opcodes read.
+
+Controllers move sounding notes too. A piece's controller moves (`track.cc`,
+`note.modulations`, `midi.ccN` automation lanes, gathered by io's
+`controllerEvents`) reach the instrument as `controllerChange`, and each voice
+follows the controllers its regions name: gain (`gain_ccN`, `volume_ccN`), its
+share of a crossfade between layers (`xfin_loccN`…), and brightness
+(`cutoff_ccN`). That is how the "performance" instruments of Sonatina or
+Virtual Playing Orchestra swell on a held note under the mod wheel:
+
+```js
+automation: [{ target: "midi.cc1", anchorPoints: [
+  { time: 0, value: 0.1 }, { time: 4, value: 1 }, { time: 8, value: 0.1 },
+] }]
+```
+
+A SoundFont instrument passes the same moves to its channel, plus pitch bend
+(±2 semitones) and channel pressure.
+
+WAV files are read by the package, not decoded by the browser, so they keep
+their own sample rate and the loop in their `smpl` chunk: Firefox's resampling
+at decode smears a file's last frames, and a loop ending there clicks each
+time round. Each loop's end is also crossfaded over 20 ms into what precedes
+its start. Other formats (FLAC, Ogg) go to `decodeAudioData`.
+
 ## API
 
 The four methods a host calls. All optional; a host degrades on each
@@ -203,11 +278,10 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 
 ## Not included
 
-`.sf2` parsing, velocity layers, reverb. These are per-note sample sets (the
-midi-js layout, one MP3 per pitch). For a real SoundFont engine see
-[spessasynth_lib](https://www.npmjs.com/package/spessasynth_lib) or
-[js-synthesizer](https://www.npmjs.com/package/js-synthesizer); the API above
-is small enough to write an adapter against.
+`.sf2` parsing and reverb. SoundFont banks are played by
+[spessasynth_lib](https://www.npmjs.com/package/spessasynth_lib), on request
+(`useSoundfont`). SFZ's modulation matrix (`<curve>`, `<effect>`, most
+`*_oncc` targets, filter and pitch envelopes) is not read.
 
 ## Tests
 
@@ -215,7 +289,7 @@ is small enough to write an adapter against.
 node --test tests/*.test.js
 ```
 
-31 tests, no dependencies and no network: the CDN probe takes an injected
+73 tests, no dependencies and no network: the CDN probe takes an injected
 `fetch`.
 
 ## License

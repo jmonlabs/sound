@@ -57,6 +57,15 @@ import {
 } from "./drumkits.js";
 
 import {
+  createSoundfontInstrument,
+  defaultSoundfontAttack,
+  soundfontInUse,
+  useSoundfont,
+} from "./soundfont.js";
+
+import { createSfzInstrument } from "./sfz.js";
+
+import {
   analyseSustain,
   applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
@@ -79,12 +88,14 @@ function midiToNoteName(midi) {
  * Read a track's `synth` spec and say what sampled instrument it asks for.
  *
  * Recognised: a General MIDI program number, `{ gm }` or `{ program }` with
- * the sampling options beside it, and a drum kit name. Anything else — a Tone
+ * the sampling options beside it, a drum kit name, `{ sfz }`, an SFZ
+ * instrument (see sfz.js), and `{ sf2, program, bankSelect }`, a program of a
+ * SoundFont bank (see soundfont.js). Anything else — a Tone
  * class name, an inline `{ type, options }` — is not this package's business,
  * so it returns `null` and the caller builds it itself.
  *
  * @param {*} spec - A track's `synth`, after any preset has been expanded
- * @returns {{kind: 'gm'|'drumkit', ...}|null}
+ * @returns {{kind: 'gm'|'drumkit'|'sfz'|'sf2', ...}|null}
  */
 export function readSpec(spec) {
   if (typeof spec === "number") return { kind: "gm", program: spec };
@@ -95,6 +106,28 @@ export function readSpec(spec) {
   }
 
   if (spec && typeof spec === "object") {
+    if (typeof spec.sfz === "string") {
+      return {
+        kind: "sfz",
+        sfz: spec.sfz,
+        staccato: spec.staccato,
+        staccatoUnder: spec.staccatoUnder,
+        envelope: spec.envelope,
+        volume: spec.volume,
+        controllers: spec.controllers,
+      };
+    }
+
+    if (typeof spec.sf2 === "string") {
+      return {
+        kind: "sf2",
+        bank: spec.sf2,
+        program: spec.program ?? 0,
+        bankSelect: spec.bankSelect ?? 0,
+        controllers: spec.controllers,
+      };
+    }
+
     // `{ kit: "name" }` is the object form of `"drumkit:name"`, so a sample
     // set can carry options the string form has no room for. Any registered
     // kit works, not only drums: one file per key is also how you play a set
@@ -117,6 +150,8 @@ export function readSpec(spec) {
       // has to know banks exist. An explicit baseUrl still wins.
       baseUrl: spec.baseUrl || (spec.bank ? bankBase(spec.bank) : undefined),
       options: spec.options,
+      soundfont: spec.soundfont,
+      controllers: spec.controllers,
     };
   }
 
@@ -150,7 +185,24 @@ export function create(spec, Tone) {
   const asked = readSpec(spec);
   if (!asked || !Tone?.Sampler) return null;
 
+  if (asked.kind === "sf2") {
+    const { kind, ...preset } = asked;
+    const node = createSoundfontInstrument(Tone, preset);
+    return node ? { node, isLoadable: true } : null;
+  }
+
+  if (asked.kind === "sfz") {
+    const { kind, ...options } = asked;
+    return { node: createSfzInstrument(Tone, options), isLoadable: true };
+  }
+
   if (asked.kind === "gm") {
+    // With a SoundFont bank in use, the bank plays it (see soundfont.js),
+    // unless the track says `soundfont: false` or no channel is left.
+    if (soundfontInUse() && asked.soundfont !== false) {
+      const node = createSoundfontInstrument(Tone, { program: asked.program, controllers: asked.controllers });
+      if (node) return { node, isLoadable: true };
+    }
     const urls = generateSamplerUrls(
       asked.program,
       asked.baseUrl,
@@ -218,6 +270,7 @@ export async function prepare(specs) {
  * @returns {boolean} Whether any voice was reached
  */
 export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {
+  if (node?.isSoundfont || node?.isSfz) return node.bend(midi, startTime, anchors, baseCents);
   if (!canResample(node)) return false;
   return applyPitchAnchorsToSampler(node, midi, startTime, anchors, baseCents);
 }
@@ -257,6 +310,7 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
  * @returns {boolean} Whether any voice was reached
  */
 export function shapeVoices(node, midi, startTime, anchors, options = {}) {
+  if (node?.isSoundfont || node?.isSfz) return node.shape(midi, startTime, anchors, options);
   if (!canResample(node)) return false;
   const seconds = (value) => (typeof node.toSeconds === "function" ? node.toSeconds(value) : Number(value) || 0);
   return applyAmplitudeAnchorsToSampler(node, midi, startTime, anchors, {
@@ -264,6 +318,20 @@ export function shapeVoices(node, midi, startTime, anchors, options = {}) {
     attack: options.attack ?? seconds(node.attack),
     release: options.release ?? seconds(node.release),
   });
+}
+
+/**
+ * Whether a host should play this instrument's notes as a separate attack and
+ * release, and give the provider the note in between (holdVoices,
+ * shapeVoices): a Sampler, whose voices can be held and shaped, a SoundFont
+ * instrument, whose loudness curves become CC 11, or an SFZ instrument, whose
+ * notes are voices of their own.
+ *
+ * @param {Object} node - The instrument, as returned by {@link create}
+ * @returns {boolean}
+ */
+export function handlesVoices(node) {
+  return canResample(node) || node?.isSoundfont === true || node?.isSfz === true;
 }
 
 /**
@@ -282,7 +350,13 @@ export const sound = {
   bendVoices,
   holdVoices,
   shapeVoices,
+  handlesVoices,
   readSpec,
+
+  // A SoundFont bank played by a real engine instead of the midi-js files.
+  useSoundfont,
+  soundfontInUse,
+  defaultSoundfontAttack,
 
   // General MIDI.
   GM_INSTRUMENTS,
@@ -328,6 +402,9 @@ export const sound = {
 export {
   analyseSustain,
   defaultEnvelope,
+  defaultSoundfontAttack,
+  soundfontInUse,
+  useSoundfont,
   applyAmplitudeAnchorsToSampler,
   applyPitchAnchorsToSampler,
   BANKS,
