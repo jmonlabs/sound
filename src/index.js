@@ -266,7 +266,7 @@ export async function prepare(specs) {
  * @param {number} startTime - Absolute time in seconds of the note start
  * @param {Array<{time: number, value: number}>} anchors - Time relative to
  *   `startTime`, value in cents relative to the written pitch
- * @param {number} [baseCents=0] - Baseline detune, e.g. microtuning * 100
+ * @param {number} [baseCents=0] - Baseline detune, e.g. tuning * 100
  * @returns {boolean} Whether any voice was reached
  */
 export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {

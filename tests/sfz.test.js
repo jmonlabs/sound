@@ -97,6 +97,14 @@ test("a legato instrument plays its first note and its slurred notes from differ
   assert.equal(regionWeight({}, { ...note, legato: true }), 1, "an ordinary region plays either way");
 });
 
+test("a region can ask for a controller's range, and a bipolar controller is centred", () => {
+  assert.equal(regionWeight({ locc101: 1 }, { ...note, controllers: { 101: 127 } }), 1);
+  assert.equal(regionWeight({ locc101: 1 }, { ...note, controllers: { 101: 0 } }), 0);
+  assert.equal(regionWeight({ hicc4: 20 }, { ...note, controllers: { 4: 100 } }), 0);
+  assert.equal(planFor({ tune_cc90: 1200, tune_curvecc90: 1 }, { controllers: { 90: 63.5 } }).cents, 0);
+  assert.equal(planFor({ tune_cc90: 1200, tune_curvecc90: 1 }, { controllers: { 90: 127 } }).cents, 1200);
+});
+
 test("a velocity crossfade plays a region partly, at equal power", () => {
   const layer = { xfin_lovel: 63, xfin_hivel: 127 };
   assert.equal(regionWeight(layer, { ...note, velocity: 63 }), 0);

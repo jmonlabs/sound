@@ -147,15 +147,23 @@ function bufferIn(context, url) {
  * @param {number} note.random - 0 to 1, the same for every region of a note
  * @param {number} note.round - how many times this key has been played before
  * @param {number|null} note.keyswitch - the last key switch pressed
+ * @param {Object} [note.controllers] - controller number → 0..127, for
+ *   regions that play only within a controller's range (loccN, hiccN)
  * @returns {number} the region's share of the note, 0 when it is silent
  */
-export function regionWeight(region, { key, velocity, trigger, legato = false, random, round, keyswitch }) {
+export function regionWeight(region, { key, velocity, trigger, legato = false, random, round, keyswitch, controllers = {} }) {
   if (key < (region.lokey ?? 0) || key > (region.hikey ?? 127)) return 0;
   if (velocity < (region.lovel ?? 1) || velocity > (region.hivel ?? 127)) return 0;
   if (!answersTrigger(region.trigger ?? "attack", trigger, legato)) return 0;
   if (random < (region.lorand ?? 0) || random >= (region.hirand ?? 1.0001)) return 0;
   if (region.seq_length > 1 && (round % region.seq_length) + 1 !== (region.seq_position ?? 1)) return 0;
   if (typeof region.sw_last === "number" && keyswitch !== null && keyswitch !== region.sw_last) return 0;
+  for (const [opcode, bound] of Object.entries(region)) {
+    const range = /^(lo|hi)cc(\d+)$/.exec(opcode);
+    if (!range) continue;
+    const value = controllers[range[2]] ?? 0;
+    if (range[1] === "lo" ? value < bound : value > bound) return 0;
+  }
   const byVelocity = crossfade(velocity, region.xfin_lovel, region.xfin_hivel, region.xfout_lovel, region.xfout_hivel, region.xf_velcurve);
   const byKey = crossfade(key, region.xfin_lokey, region.xfin_hikey, region.xfout_lokey, region.xfout_hikey, region.xf_keycurve);
   return byVelocity * byKey;
@@ -190,9 +198,12 @@ function byControllers(region, names, controllers) {
   let total = 0;
   for (const [opcode, amount] of Object.entries(region)) {
     const match = /^(.+?)_?(?:on)?cc(\d+)$/.exec(opcode);
-    if (match && names.includes(match[1]) && typeof amount === "number") {
-      total += amount * ((controllers[match[2]] ?? 0) / 127);
-    }
+    if (!match || !names.includes(match[1]) || typeof amount !== "number") continue;
+    const position = (controllers[match[2]] ?? 0) / 127;
+    // Curve 1 is bipolar: the middle of the controller is no change, so a
+    // tuning knob at rest (64) leaves the pitch alone.
+    const bipolar = region[`${match[1]}_curvecc${match[2]}`] === 1;
+    total += amount * (bipolar ? position * 2 - 1 : position);
   }
   return total;
 }
@@ -552,9 +563,9 @@ class SfzInstrument {
     // way a slurred line is written.
     const legato = trigger === "attack"
       && this.voices.some((v) => v.trigger !== "release" && v.start < at && v.releasedAt >= at);
-    const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch };
-    const started = [];
     const controllers = this.controllersAt(file, at);
+    const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch, controllers };
+    const started = [];
     for (const region of file.regions) {
       const weight = regionWeight(region, note);
       if (weight === 0) continue;
@@ -771,7 +782,7 @@ class SfzInstrument {
    * @param {number} startTime - seconds
    * @param {Array<{time:number,value:number}>} anchors - seconds from the
    *   start, cents from the written pitch
-   * @param {number} [baseCents=0] - a constant offset (microtuning)
+   * @param {number} [baseCents=0] - a constant offset (the note's tuning)
    * @returns {boolean} true: the note bends
    */
   bend(midi, startTime, anchors, baseCents = 0) {

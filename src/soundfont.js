@@ -282,7 +282,7 @@ class SoundfontInstrument {
    * @param {number} startTime - seconds
    * @param {Array<{time:number,value:number}>} anchors - seconds from the
    *   start, cents from the written pitch
-   * @param {number} [baseCents=0] - a constant offset (microtuning)
+   * @param {number} [baseCents=0] - a constant offset (the note's tuning)
    * @returns {boolean} true: the note bends
    */
   bend(midi, startTime, anchors, baseCents = 0) {
