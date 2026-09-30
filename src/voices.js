@@ -50,7 +50,7 @@ export function canResample(synth) {
  * @param {number} startTime — absolute time in seconds of the note start
  * @param {Array<{time:number,value:number}>} anchors — time in seconds
  *   relative to `startTime`, value in cents relative to the written pitch
- * @param {number} [baseCents=0] — baseline detune (e.g. microtuning * 100)
+ * @param {number} [baseCents=0] — baseline detune (e.g. tuning * 100)
  * @returns {boolean} whether any voice was reached
  */
 export function applyPitchAnchorsToSampler(synth, midi, startTime, anchors, baseCents = 0) {
