@@ -68,6 +68,41 @@ export const drumKits = {
 };
 
 /**
+ * The General MIDI drum kits of the MuseScore General bank (licence MIT),
+ * kept alone in one 1.9 MB file at github.com/jmonlabs/sf (musescore/drums.sf3): every General MIDI
+ * drum sound from 35 to 81 (kick, snares, claps, hi-hats, toms, cymbals,
+ * cowbell, congas…). `synth: "drumkit"` plays the Standard kit, and
+ * `"drumkit:<name>"` one of the others. They load like a General MIDI program:
+ * nothing to install or declare.
+ */
+export const DRUM_BANK_KITS = Object.freeze({
+  standard: 0,
+  room: 8,
+  power: 16,
+  electronic: 24,
+  808: 25,
+  jazz: 32,
+  brush: 40,
+  orchestra: 48,
+});
+
+let drumBank = "https://cdn.jsdelivr.net/gh/jmonlabs/sf@main/musescore/drums.sf3";
+
+/**
+ * Load the drum bank from somewhere else (a local copy), or null for the
+ * default at github.com/jmonlabs/sf.
+ * @param {string|null} url
+ */
+export function setDrumBank(url) {
+  drumBank = url || "https://cdn.jsdelivr.net/gh/jmonlabs/sf@main/musescore/drums.sf3";
+}
+
+/** The drum bank's URL. */
+export function getDrumBank() {
+  return drumBank;
+}
+
+/**
  * Load the built-in kits from somewhere else: a local copy of Tone.js's audio
  * repository, laid out the same way (`drum-samples/acoustic-kit/kick.mp3`).
  * Passing null restores GitHub Pages. Kits added with registerDrumKit keep
@@ -113,10 +148,14 @@ export function getDrumKit(name) {
  * @param {string} synthSpec
  */
 export function parseDrumKitSpec(synthSpec) {
+  if (synthSpec === "drumkit") return { name: "standard", program: DRUM_BANK_KITS.standard };
   if (typeof synthSpec !== "string" || !synthSpec.startsWith("drumkit:")) {
     return null;
   }
   const name = synthSpec.slice("drumkit:".length);
+  if (drumKits[name] === undefined && DRUM_BANK_KITS[name] !== undefined) {
+    return { name, program: DRUM_BANK_KITS[name] };
+  }
   const kit = drumKits[name];
   if (!kit) {
     return { name, kit: null };

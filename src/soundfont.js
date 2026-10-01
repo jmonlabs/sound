@@ -30,6 +30,22 @@
 let settings = null;
 let libraryModule = null;
 
+/**
+ * The engine shipped with this package, beside it: spessasynth_lib and its
+ * AudioWorklet processor (vendor/spessasynth). A drum kit or an `{ sf2 }`
+ * track plays without useSoundfont() being called first; useSoundfont() may
+ * still point elsewhere.
+ */
+const ENGINE = {
+  library: new URL("../vendor/spessasynth/spessasynth_lib.js", import.meta.url).href,
+  processor: new URL("../vendor/spessasynth/spessasynth_processor.min.js", import.meta.url).href,
+};
+
+/** Where `library` and `processor` come from: useSoundfont(), or the engine shipped here. */
+function engine() {
+  return { library: settings?.library ?? ENGINE.library, processor: settings?.processor ?? ENGINE.processor };
+}
+
 /** Each bank file's bytes, fetched once: url → Promise<ArrayBuffer>. */
 const bankBytes = new Map();
 
@@ -44,6 +60,7 @@ const BEND_RANGE = 12;
 
 /** Channel 9 is General MIDI's drum channel; outputs beyond 16 wrap around. */
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+const DRUM_CHANNEL = 9;
 
 /**
  * CC 73 (attack time) by family, 64 being the bank's own attack. Bowed strings
@@ -96,23 +113,23 @@ export function defaultSoundfontAttack(program) {
  *   where a bank keeps variations of its programs
  * @param {Object} [preset.controllers] - controller number → 0..127
  */
-export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {} }) {
-  if (!settings?.library || !settings?.processor || !Tone?.getContext) {
-    console.warn("A SoundFont track needs useSoundfont({ library, processor }) first.");
-    return null;
-  }
-  const url = bank ?? settings.bank;
+export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {}, drums = false }) {
+  if (!Tone?.getContext) return null;
+  const url = bank ?? settings?.bank;
   if (!url) return null;
   const context = Tone.getContext();
   const entry = sharedFor(context, url);
-  const channel = CHANNELS.find((c) => !entry.channels.has(c));
+  // A drum kit takes General MIDI's drum channel when it is free, and any
+  // other channel switched to drums when it is not.
+  const order = drums ? [DRUM_CHANNEL, ...CHANNELS] : CHANNELS;
+  const channel = order.find((c) => !entry.channels.has(c));
   if (channel === undefined) return null;
   entry.channels.add(channel);
-  const familyAttack = bank === undefined ? { 73: defaultSoundfontAttack(program) } : {};
+  const familyAttack = bank === undefined && !drums ? { 73: defaultSoundfontAttack(program) } : {};
   return new SoundfontInstrument(Tone, context, entry, channel, program, bankSelect, {
     ...familyAttack,
     ...controllers,
-  });
+  }, drums);
 }
 
 function sharedFor(context, url) {
@@ -123,7 +140,7 @@ function sharedFor(context, url) {
 }
 
 async function startSynth(context, bank) {
-  const { library, processor } = settings;
+  const { library, processor } = engine();
   libraryModule ??= import(library);
   if (!bankBytes.has(bank)) {
     bankBytes.set(bank, fetch(bank).then((r) => {
@@ -154,7 +171,7 @@ function midiValue(value) {
  * triggerRelease, triggerAttackRelease, releaseAll, dispose).
  */
 class SoundfontInstrument {
-  constructor(Tone, context, entry, channel, program, bankSelect, controllers) {
+  constructor(Tone, context, entry, channel, program, bankSelect, controllers, drums = false) {
     this.Tone = Tone;
     this.context = context;
     this.channel = channel;
@@ -169,6 +186,7 @@ class SoundfontInstrument {
       if (this.disposed) return;
       this.synth = synth;
       synth.connectChannel(this.output.input, channel);
+      if (drums && channel !== DRUM_CHANNEL) synth.midiChannels[channel].setDrums(true);
       if (bankSelect) synth.controllerChange(channel, 0, bankSelect);
       synth.programChange(channel, program);
       // Room for a glissando of an octave either way (see bend).

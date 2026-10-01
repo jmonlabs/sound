@@ -49,10 +49,13 @@ import {
 } from "./gm.js";
 
 import {
+  DRUM_BANK_KITS,
   drumKits,
+  getDrumBank,
   getDrumKit,
   parseDrumKitSpec,
   registerDrumKit,
+  setDrumBank,
   setDrumKitSource,
 } from "./drumkits.js";
 
@@ -225,8 +228,14 @@ export function create(spec, Tone) {
     return { node, isLoadable: true };
   }
 
+  // A kit of the drum bank (see drumkits.js): the bank's engine plays it.
+  if (asked.program !== undefined) {
+    const node = createSoundfontInstrument(Tone, { bank: getDrumBank(), program: asked.program, drums: true });
+    return node ? { node, isLoadable: true } : null;
+  }
+
   if (!asked.kit) {
-    console.warn(`Unknown drumkit "${asked.name}".`);
+    console.warn(`Unknown drumkit "${asked.name}". Known: ${["drumkit", ...Object.keys(DRUM_BANK_KITS).map((k) => `drumkit:${k}`), ...Object.keys(drumKits).map((k) => `drumkit:${k}`)].join(", ")}`);
     return null;
   }
   const urls = {};
@@ -391,6 +400,7 @@ export const sound = {
   registerDrumKit,
   getDrumKit,
   setDrumKitSource,
+  setDrumBank,
 
   // The analysis behind holdVoices, exposed because it is the interesting part.
   analyseSustain,
@@ -432,6 +442,7 @@ export {
   registerDrumKit,
   resolveSoundfontBase,
   setDrumKitSource,
+  setDrumBank,
   setSamplingStrategy,
   setSoundfontBank,
   setSoundfontBase,

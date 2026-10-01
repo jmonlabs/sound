@@ -143,16 +143,20 @@ test("a track can take a program from any bank, each bank with a synthesizer of 
   }
 });
 
-test("an sf2 track with no engine named says so and is not built", () => {
-  const warn = console.warn;
-  const warnings = [];
-  console.warn = (m) => warnings.push(m);
-  try {
-    assert.equal(sound.create({ sf2: "strings.sf2", program: 40 }, fakeTone()), null);
-    assert.match(warnings[0], /useSoundfont\(\{ library, processor \}\)/);
-  } finally {
-    console.warn = warn;
-  }
+test("an sf2 track plays with the engine shipped beside the package, useSoundfont or not", () => {
+  const built = sound.create({ sf2: "strings.sf2", program: 40 }, fakeTone());
+  assert.ok(built?.node?.isSoundfont, "built on the shipped engine");
+});
+
+test("drumkit plays the drum bank, on the drum channel, with nothing declared", () => {
+  const Tone = fakeTone();
+  const built = sound.create("drumkit", Tone);
+  assert.ok(built?.node?.isSoundfont);
+  assert.equal(built.node.channel, 9, "General MIDI's drum channel");
+  const second = sound.create("drumkit:808", Tone);
+  assert.ok(second?.node?.isSoundfont, "a second kit takes another channel, switched to drums");
+  assert.notEqual(second.node.channel, 9);
+  assert.equal(sound.create("drumkit:acoustic", fakeTone()).node.isSoundfont, undefined, "the Tone.js kits are unchanged");
 });
 
 test("a piece's controller moves reach the channel as MIDI values", async () => {
