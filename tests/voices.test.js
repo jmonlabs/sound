@@ -66,7 +66,10 @@ test("the loop join is levelled and crossfaded before it is used", async () => {
 
   // And 4.15 dB unfixed, 2.35 dB with the crossfade alone, 0.30 dB once the
   // gain ramp levels the loop. Likewise isolates the ramp.
-  const levelAfter = Math.abs(20 * Math.log10(rms(s, s + measure) / rms(e - measure, e)));
+  // Measured just before the crossfade, which replaces the last part of the
+  // loop with what precedes loopStart.
+  const fade = Math.min(Math.round((length / 2) * 0.3), s, Math.floor((e - s) / 3));
+  const levelAfter = Math.abs(20 * Math.log10(rms(s, s + measure) / rms(e - fade - measure, e - fade)));
   assert.ok(Math.abs(20 * Math.log10(levelBefore)) > 2, "nothing to fix");
   assert.ok(levelAfter < 1, `loop should be level, got ${levelAfter.toFixed(2)} dB`);
 });

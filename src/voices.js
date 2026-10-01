@@ -210,8 +210,10 @@ export function analyseSustain(buffer, options = {}) {
   // Loop the steady part: past the attack, short of the very end, where an
   // encoder's fade-out lives. The loop starts on a rising zero crossing and
   // ends where the recording repeats what follows its start; failing that,
-  // on a zero crossing near the end.
-  const from = zeroCrossingNear(data, Math.floor(data.length * 0.45), Math.floor(data.length * 0.50));
+  // on a zero crossing near the end. A long loop turns less often: one that
+  // started halfway through a 3.13-second recording came round every 1.4 s,
+  // and on a low accordion note each turn was heard as a lurch.
+  const from = zeroCrossingNear(data, Math.floor(data.length * 0.20), Math.floor(data.length * 0.25));
   const last = Math.floor(data.length * 0.95);
   const to = repeatEnd(data, from, last, rate)
     ?? zeroCrossingNear(data, Math.floor(data.length * 0.90), last);
@@ -261,7 +263,9 @@ export function prepareLoopRegion(buffer, analysis) {
   const channels = buffer.numberOfChannels || 1;
   const { startSample: start, endSample: end } = analysis;
   const rate = (buffer.length || 0) / (buffer.duration || 1);
-  const fade = Math.min(Math.round(rate * 0.05), start, end - start);
+  // A long crossfade: 50 ms joined the waveform but not the slow beating of
+  // an accordion's reeds, which was heard at every turn; 300 ms was not.
+  const fade = Math.min(Math.round(rate * 0.3), start, Math.floor((end - start) / 3));
   if (!(end > start) || fade <= 0) return true;
 
   const measure = Math.min(Math.round(rate * 0.25), end - start);
