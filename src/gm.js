@@ -706,10 +706,10 @@ export const GM_SAMPLE_SECONDS = 3.13;
  * The longest note, in quarter notes, that a GM sample can sustain at a
  * given tempo. Past this the sound runs out before the note does.
  *
- * Pair it with `jm.utils.splitLongNotes` to re-articulate what would
- * otherwise fall silent:
+ * Pair it with `jm.notes.split` to re-articulate what would otherwise fall
+ * silent:
  *
- *     const safe = jm.utils.splitLongNotes(notes, gmMaxBeats(tempo));
+ *     const safe = jm.notes.split(notes, gmMaxBeats(tempo));
  *
  * @param {number} [tempo=120] - Beats per minute
  * @returns {number} Quarter notes
