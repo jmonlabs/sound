@@ -1,7 +1,7 @@
 {
   "name": "@jmon/sound",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sampled instruments for jmon/algo: General MIDI, drum kits, and the voice handling a soundfont engine does. Distributed as ESM source via jsDelivr from GitHub — no build, no npm publish.",
   "type": "module",
   "license": "GPL-3.0-or-later",

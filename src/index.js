@@ -82,7 +82,7 @@ import {
   sustainSampledNote,
 } from "./voices.js";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 
 /** MIDI note number to the note name Tone's Sampler keys its urls by. */
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
