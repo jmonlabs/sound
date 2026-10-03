@@ -18,7 +18,8 @@ globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBu
 const fakeTone = () => {
   const context = {
     currentTime: 0,
-    rawContext: { name: "raw" },
+    rawContext: { name: "raw", audioWorklet: { loaded: [], addModule: async function (url) { this.loaded.push(url); } } },
+    // Like Tone 14: one module per context, whichever was asked for first.
     addAudioWorkletModule: async () => {},
     createAudioWorkletNode: () => ({ name: "worklet" }),
   };
@@ -176,4 +177,18 @@ test("a piece's controller moves reach the channel as MIDI values", async () => 
   } finally {
     sound.useSoundfont(null);
   }
+});
+
+test("the synthesizer's processor loads even when another module came first, once per context", async () => {
+  // Tone's addAudioWorkletModule keeps only the first module of a context: a
+  // BitCrusher's, say. The processor has to reach the browser all the same.
+  const Tone = fakeTone();
+  const raw = Tone.getContext().rawContext;
+  sound.useSoundfont({ bank: "worklet.sf3", library, processor: "processor.js" });
+  const a = sound.create({ gm: 0 }, Tone);
+  const b = sound.create({ gm: 1 }, Tone);
+  await a.node.loaded;
+  await b.node.loaded;
+  assert.deepEqual(raw.audioWorklet.loaded, ["processor.js"]);
+  sound.useSoundfont(false);
 });

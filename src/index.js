@@ -51,6 +51,10 @@ import {
 import {
   DRUM_BANK_KITS,
   drumKits,
+  drumSampleUrls,
+  getDrumSamples,
+  GM_DRUM_KITS,
+  setDrumSamples,
   getDrumBank,
   getDrumKit,
   parseDrumKitSpec,
@@ -98,13 +102,21 @@ function midiToNoteName(midi) {
  * so it returns `null` and the caller builds it itself.
  *
  * @param {*} spec - A track's `synth`, after any preset has been expanded
- * @returns {{kind: 'gm'|'drumkit'|'sfz'|'sf2', ...}|null}
+ * @returns {{kind: 'gm'|'drums'|'drumkit'|'sfz'|'sf2', ...}|null}
  */
 export function readSpec(spec) {
   if (typeof spec === "number") return { kind: "gm", program: spec };
 
+  // `"drums"`, or `{ drums: 32 }` for another General MIDI kit: the drums as
+  // samples (see GM_DRUM_KITS).
+  if (spec === "drums") return { kind: "drums", program: 0 };
+  if (spec && typeof spec === "object" && typeof spec.drums === "number") {
+    return { kind: "drums", program: spec.drums, options: spec.options };
+  }
+
   if (typeof spec === "string") {
     const kit = parseDrumKitSpec(spec);
+    if (kit) warnRenamed(spec);
     return kit ? { kind: "drumkit", ...kit } : null;
   }
 
@@ -136,6 +148,7 @@ export function readSpec(spec) {
     // kit works, not only drums: one file per key is also how you play a set
     // of spoken phrases, field recordings, or anything else one-shot.
     const kitName = spec.kit ?? spec.drumkit;
+    if (typeof spec.drumkit === "string") warnRenamed(`drumkit:${spec.drumkit}`);
     if (typeof kitName === "string") {
       return { kind: "drumkit", ...parseDrumKitSpec(`drumkit:${kitName}`), options: spec.options };
     }
@@ -159,6 +172,22 @@ export function readSpec(spec) {
   }
 
   return null;
+}
+
+const renamedWarned = new Set();
+
+/**
+ * "drumkit…" still plays, but once per name it says what to write instead: the
+ * drums for a General MIDI kit, the object form for a kit registered by hand.
+ */
+function warnRenamed(name) {
+  if (renamedWarned.has(name)) return;
+  renamedWarned.add(name);
+  const kit = name.startsWith("drumkit:") ? name.slice("drumkit:".length) : null;
+  const custom = kit && drumKits[kit] && kit !== "acoustic" && kit !== "r8";
+  console.warn(custom
+    ? `synth "${name}" is the old name. Write { kit: "${kit}" }.`
+    : `synth "${name}" is the old name. Write "drums" for the General MIDI drums (every drum, as samples), or { drums: <kit number> } for another kit (32 jazz, 40 brush…).`);
 }
 
 /**
@@ -192,6 +221,12 @@ export function create(spec, Tone) {
     const { kind, ...preset } = asked;
     const node = createSoundfontInstrument(Tone, preset);
     return node ? { node, isLoadable: true } : null;
+  }
+
+  if (asked.kind === "drums") {
+    // A drum is a one-shot: a long release lets it ring out past a short note.
+    const node = new Tone.Sampler({ urls: drumSampleUrls(asked.program, midiToNoteName), baseUrl: "", release: 4, ...(asked.options || {}) });
+    return { node, isLoadable: true };
   }
 
   if (asked.kind === "sfz") {
@@ -401,6 +436,9 @@ export const sound = {
   getDrumKit,
   setDrumKitSource,
   setDrumBank,
+  setDrumSamples,
+  getDrumSamples,
+  GM_DRUM_KITS,
 
   // The analysis behind holdVoices, exposed because it is the interesting part.
   analyseSustain,
@@ -443,6 +481,9 @@ export {
   resolveSoundfontBase,
   setDrumKitSource,
   setDrumBank,
+  setDrumSamples,
+  getDrumSamples,
+  GM_DRUM_KITS,
   setSamplingStrategy,
   setSoundfontBank,
   setSoundfontBase,

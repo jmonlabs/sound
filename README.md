@@ -24,7 +24,7 @@ jm.play(piece, { Tone, sound });
 ```js
 { label: "Violin", synth: 40, notes }                        // GM program 0-127
 { label: "Violin", synth: { gm: 40, strategy: "complete" } } // sampling density
-{ label: "Drums",  synth: "drumkit", notes }                 // a General MIDI drum kit
+{ label: "Drums",  synth: "drums", notes }                   // the General MIDI drums
 ```
 
 Or through [`jmon/studio`](https://github.com/jmonlabs/studio), which
@@ -41,14 +41,15 @@ node.triggerAttackRelease("C4", 2);
 
 ## Drums
 
-`synth: "drumkit"` is a General MIDI drum kit: every drum sound from 35 to 81 (kick, snares, claps, hi-hats, toms, cymbals, cowbell, congas…), loaded on its own like a program number. It is the Standard kit of the MuseScore General bank (licence MIT), kept alone in one 1.9 MB file at [jmonlabs/sf](https://github.com/jmonlabs/sf), and played by the SoundFont engine shipped with this package. Seven more kits of the same bank: `"drumkit:room"`, `"drumkit:power"`, `"drumkit:electronic"`, `"drumkit:808"`, `"drumkit:jazz"`, `"drumkit:brush"`, `"drumkit:orchestra"`.
+`synth: "drums"` is the General MIDI drum kit: every drum sound from 35 to 81 (kick, snares, claps, hi-hats, toms, cymbals, cowbell, congas…), one recording each, played by a Tone.Sampler like the melodic instruments. `synth: { drums: n }` picks another kit by its General MIDI number: 0 standard, 8 room, 16 power, 24 electronic, 25 808, 32 jazz, 40 brush, 48 orchestra. The recordings are the kits of the MuseScore General bank (licence MIT), rendered note by note at [jmonlabs/sf](https://github.com/jmonlabs/sf) (`musescore/drums/`). A drum rings out past its written note (`release: 4`), as on General MIDI's drum channel.
 
 ```js
-{ label: "Drums", synth: "drumkit", notes: jm.rhythm.kit({ kick: "x...", clap: "..x." }) }
-sound.setDrumBank("/__files/samples/sf/musescore/drums.sf3"); // a local copy
+{ label: "Drums", synth: "drums", notes: jm.rhythm.kit({ kick: "x...", clap: "..x." }) }
+{ label: "Brushes", synth: { drums: 40 }, notes }
+sound.setDrumSamples("/__files/samples/sf/musescore/drums"); // a local copy
 ```
 
-`"drumkit:acoustic"` and `"drumkit:r8"` are the small Tone.js kits: kick, snare, hi-hat and three toms only. A sound they lack is played by the nearest one, repitched.
+The old names still play, and say once what to write instead: `"drumkit"` and `"drumkit:<name>"` (the same kits, played by the SoundFont engine), and `"drumkit:acoustic"` and `"drumkit:r8"`, the small Tone.js kits (kick, snare, hi-hat and three toms only: a sound they lack is played by the nearest one, repitched).
 
 ## Banks
 
@@ -118,7 +119,7 @@ sound.registerDrumKit("poem", {
   samples: { 60: "line1.mp3", 62: "line2.mp3", 64: "line3.mp3" },
 });
 
-{ label: "Voice", synth: "drumkit:poem", notes: [
+{ label: "Voice", synth: { kit: "poem" }, notes: [
   { pitch: 60, duration: 4, time: 0 },
   { pitch: 62, duration: 4, time: 4 },
 ]}

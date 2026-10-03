@@ -143,6 +143,65 @@ export function getDrumKit(name) {
 }
 
 /**
+ * The General MIDI drum kits, as samples: every drum of a kit, rendered from
+ * the MuseScore bank into one WAV per General MIDI number, 35 to 81 (kick,
+ * snares, claps, hi-hats, toms, cymbals, cowbell, congas…), by
+ * `musescore/make-drum-samples.mjs` at github.com/jmonlabs/sf. A Tone.Sampler
+ * plays them, like the melodic instruments: no AudioWorklet, no SoundFont
+ * engine.
+ *
+ * `synth: "drums"` plays the standard kit, and `synth: { drums: 32 }` another
+ * one, by its General MIDI kit number.
+ */
+export const GM_DRUM_KITS = Object.freeze({
+  0: "standard",
+  8: "room",
+  16: "power",
+  24: "electronic",
+  25: "808",
+  32: "jazz",
+  40: "brush",
+  48: "orchestra",
+});
+
+/** The General MIDI drum numbers every kit has a recording for. */
+export const GM_DRUM_NOTES = Object.freeze(Array.from({ length: 47 }, (_, i) => 35 + i));
+
+const DRUM_SAMPLES = "https://cdn.jsdelivr.net/gh/jmonlabs/sf@main/musescore/drums";
+let drumSamples = DRUM_SAMPLES;
+
+/**
+ * Load the drum samples from somewhere else (a local copy), or null for the
+ * default at github.com/jmonlabs/sf. The folder holds one subfolder per kit
+ * (`standard/36.wav`, `jazz/36.wav`…).
+ * @param {string|null} root
+ */
+export function setDrumSamples(root) {
+  drumSamples = root || DRUM_SAMPLES;
+}
+
+/** Where the drum samples come from. */
+export function getDrumSamples() {
+  return drumSamples;
+}
+
+/**
+ * The `{ urls }` of a Tone.Sampler playing General MIDI kit `program`, one
+ * recording per drum number. An unknown kit number warns and plays the
+ * standard kit.
+ * @param {number} program - A General MIDI drum kit number (0 standard, 32 jazz…)
+ * @param {(midi: number) => string} noteName - MIDI number to Tone note name
+ */
+export function drumSampleUrls(program, noteName) {
+  let folder = GM_DRUM_KITS[program];
+  if (!folder) {
+    console.warn(`Unknown drum kit ${program}. Known: ${Object.entries(GM_DRUM_KITS).map(([n, name]) => `${n} (${name})`).join(", ")}. Playing the standard kit.`);
+    folder = GM_DRUM_KITS[0];
+  }
+  return Object.fromEntries(GM_DRUM_NOTES.map((midi) => [noteName(midi), `${drumSamples}/${folder}/${midi}.wav`]));
+}
+
+/**
  * Parse a synth string of the form "drumkit:<name>" and return the kit,
  * or null if the string is not a drumkit reference.
  * @param {string} synthSpec

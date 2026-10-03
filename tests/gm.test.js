@@ -460,3 +460,50 @@ test("an instrument starts and stops the way its family does, unless the track s
   assert.equal(create("drumkit:acoustic", { Sampler }).node.options.release, undefined,
     "a drum kit keeps Tone's own short release: a written hit is already as long as it should sound");
 });
+
+test('"drums" plays every General MIDI drum, as samples, from the standard kit', async () => {
+  const { create, readSpec } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  assert.deepEqual(readSpec("drums"), { kind: "drums", program: 0 });
+  const urls = create("drums", { Sampler }).node.options.urls;
+  assert.equal(Object.keys(urls).length, 47, "one recording per drum, 35 to 81");
+  assert.match(urls.C2, /\/standard\/36\.wav$/, "36 is the kick");
+  assert.match(urls["C#3"], /\/standard\/49\.wav$/, "49 is the crash: a real one, not a transposed tom");
+});
+
+test("{ drums: n } picks a General MIDI kit by its number, and an unknown one falls back to standard", async () => {
+  const { create, setDrumSamples } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  try {
+    setDrumSamples("/__files/samples/sf/musescore/drums");
+    assert.equal(create({ drums: 32 }, { Sampler }).node.options.urls.C2, "/__files/samples/sf/musescore/drums/jazz/36.wav");
+    const warn = console.warn; let said = "";
+    console.warn = (m) => { said = m; };
+    try {
+      assert.match(create({ drums: 7 }, { Sampler }).node.options.urls.C2, /\/standard\/36\.wav$/);
+    } finally { console.warn = warn; }
+    assert.match(said, /Unknown drum kit 7/);
+  } finally {
+    setDrumSamples(null);
+  }
+});
+
+test("a drum rings out past its written note, as on General MIDI's drum channel", async () => {
+  const { create } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  assert.equal(create("drums", { Sampler }).node.options.release, 4);
+  assert.equal(create({ drums: 0, options: { release: 0.2 } }, { Sampler }).node.options.release, 0.2, "the track's own value wins");
+});
+
+test('"drumkit" still plays, and says once what to write instead', async () => {
+  const { create } = await import("../src/index.js");
+  class Sampler { constructor(options) { this.options = options; } }
+  const warn = console.warn; const said = [];
+  console.warn = (m) => said.push(m);
+  try {
+    create("drumkit:r8", { Sampler });
+    create("drumkit:r8", { Sampler });
+  } finally { console.warn = warn; }
+  assert.equal(said.length, 1);
+  assert.match(said[0], /Write "drums"/);
+});

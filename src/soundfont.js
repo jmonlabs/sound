@@ -55,6 +55,9 @@ const bankBytes = new Map();
  */
 const shared = new WeakMap();
 
+/** The synthesizer's AudioWorklet module, loaded once per audio context. */
+const workletModules = new WeakMap();
+
 /** Semitones the pitch wheel covers either way. */
 const BEND_RANGE = 12;
 
@@ -149,7 +152,13 @@ async function startSynth(context, bank) {
     }));
   }
   const [{ WorkletSynthesizer }, bytes] = await Promise.all([libraryModule, bankBytes.get(bank)]);
-  await context.addAudioWorkletModule(processor, "spessasynth");
+  // Tone's own addAudioWorkletModule loads one module per context, the first
+  // one asked for, and silently skips the rest: after a BitCrusher, say, the
+  // synthesizer's processor was never loaded and the drums stayed silent.
+  // The module goes to the browser directly, once per context.
+  const raw = context.rawContext;
+  if (!workletModules.has(raw)) workletModules.set(raw, raw.audioWorklet.addModule(processor));
+  await workletModules.get(raw);
   const synth = new WorkletSynthesizer(context.rawContext, {
     audioNodeCreators: { worklet: (_, name, options) => context.createAudioWorkletNode(name, options) },
   });
