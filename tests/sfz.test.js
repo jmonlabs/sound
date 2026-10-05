@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSfz, readWav, sfzKey } from "../src/sfz-parse.js";
-import { controlPlan, envelopeLevel, regionWeight, voicePlan } from "../src/sfz.js";
+import { controlPlan, envelopeLevel, regionsForNotes, regionWeight, voicePlan } from "../src/sfz.js";
 
 const sound = await import("../src/index.js");
 
@@ -87,6 +87,27 @@ test("a region answers the keys, velocities, round and key switch it is mapped t
   assert.equal(regionWeight({ lorand: 0, hirand: 0.5 }, note), 0);
   assert.equal(regionWeight({ sw_last: 36 }, { ...note, keyswitch: 37 }), 0);
   assert.equal(regionWeight({ sw_last: 36 }, { ...note, keyswitch: 36 }), 1);
+});
+
+test("only the regions a track's notes can play are kept", () => {
+  const regions = [
+    { sample: "c4-soft.wav", lokey: 60, hikey: 60, lovel: 1, hivel: 40 },
+    { sample: "c4-loud.wav", lokey: 60, hikey: 60, lovel: 41, hivel: 127 },
+    { sample: "d4-soft.wav", lokey: 61, hikey: 63, lovel: 1, hivel: 40 },
+    { sample: "c6-soft.wav", lokey: 84, hikey: 84, lovel: 1, hivel: 40 },
+    { sample: "c4-release.wav", lokey: 60, hikey: 60, trigger: "release" },
+    { sample: "c6-release.wav", lokey: 84, hikey: 84, trigger: "release" },
+  ];
+  const kept = (notes) => regionsForNotes(regions, notes).map((r) => r.sample);
+  // A soft c4 and a soft chord with d4: the loud layer and the high c stay out.
+  assert.deepEqual(kept([{ pitch: 60, velocity: 0.2 }, { pitch: [60, 62], velocity: 0.25 }]), ["c4-soft.wav", "d4-soft.wav", "c4-release.wav"]);
+  // Velocity 0.33 is 42: the loud layer, and the soft one within the margin of 2.
+  assert.deepEqual(kept([{ pitch: 60, velocity: 0.33 }]), ["c4-soft.wav", "c4-loud.wav", "c4-release.wav"]);
+  // A microtuned b3 a little over a semitone up sounds c4.
+  assert.deepEqual(kept([{ pitch: 59, tuning: 0.6, velocity: 0.2 }]), ["c4-soft.wav", "c4-release.wav"]);
+  // Rests play nothing; a note name keeps everything rather than guess.
+  assert.deepEqual(kept([{ pitch: null, velocity: 0.5 }]), []);
+  assert.equal(kept([{ pitch: "C4", velocity: 0.5 }]).length, regions.length);
 });
 
 test("a legato instrument plays its first note and its slurred notes from different regions", () => {

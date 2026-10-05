@@ -169,6 +169,50 @@ export function regionWeight(region, { key, velocity, trigger, legato = false, r
   return byVelocity * byKey;
 }
 
+/**
+ * The regions some of `notes` can play, so a large instrument loads only the
+ * recordings a track needs: a piano line in the treble has no use for the
+ * bass strings, and a soft line none for the loudest layers.
+ *
+ * A region is kept when one of the notes falls in its key range and, for an
+ * attack region, plays at a velocity in its velocity range, give or take
+ * `margin`; a release region needs only the key. Everything else a region
+ * answers to (round robin, random, key switches, controllers) is decided while
+ * the piece plays, so those regions are all kept.
+ *
+ * @param {Array<Object>} regions - A file's regions
+ * @param {Array<Object>} notes - JMON notes: `pitch` a MIDI number or a list
+ *   of them (a chord), `velocity` 0..1, `tuning` or `microtuning` in semitones
+ * @param {number} [margin=2] - velocity steps (1..127) allowed either side
+ * @returns {Array<Object>} the regions to load, in their order
+ */
+export function regionsForNotes(regions, notes, margin = 2) {
+  const velocities = new Map(); // key -> velocities (1..127) it is played at
+  for (const note of notes) {
+    const tuning = note.tuning ?? note.microtuning ?? 0;
+    const velocity = Math.max(1, Math.min(127, Math.round((note.velocity || 0.8) * 127)));
+    for (const pitch of [].concat(note.pitch)) {
+      if (pitch === null || pitch === undefined) continue; // a rest
+      if (typeof pitch !== "number") return regions; // a note name: keep everything rather than guess
+      const key = Math.round(pitch + tuning);
+      if (!velocities.has(key)) velocities.set(key, []);
+      velocities.get(key).push(velocity);
+    }
+  }
+  return regions.filter((region) => {
+    const low = region.lokey ?? 0;
+    const high = region.hikey ?? 127;
+    for (const [key, played] of velocities) {
+      if (key < low || key > high) continue;
+      if (region.trigger === "release" || region.trigger === "release_key") return true;
+      const soft = (region.lovel ?? 1) - margin;
+      const loud = (region.hivel ?? 127) + margin;
+      if (played.some((velocity) => velocity >= soft && velocity <= loud)) return true;
+    }
+    return false;
+  });
+}
+
 /** Whether a region's `trigger` answers a note starting or ending. */
 function answersTrigger(regionTrigger, trigger, legato) {
   if (trigger === "release") return regionTrigger === "release";
@@ -382,13 +426,16 @@ function seededRandom(seed) {
  * @param {number} [spec.volume=0] - dB
  * @param {Object} [spec.controllers] - starting controller values, over the
  *   file's own `set_ccN`
+ * @param {Array<Object>} [spec.notes] - the notes the track will play: only
+ *   the regions they can sound load (see regionsForNotes). Without them,
+ *   every recording of the file loads.
  */
 export function createSfzInstrument(Tone, spec) {
   return new SfzInstrument(Tone, spec);
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {} }) {
+  constructor(Tone, { sfz, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -406,7 +453,9 @@ class SfzInstrument {
     this.moves = new Map();
 
     this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url) : null)))
-      .then(async ([sustain, short]) => {
+      .then(async (files) => {
+        // Given the track's notes, only the regions they can play are kept, and only their recordings load.
+        const [sustain, short] = files.map((file) => (file && notes ? { ...file, regions: regionsForNotes(file.regions, notes) } : file));
         const all = [sustain, short].filter(Boolean);
         const urls = new Set(all.flatMap((file) => file.regions.map((r) => r.sample)));
         this.buffers = new Map();

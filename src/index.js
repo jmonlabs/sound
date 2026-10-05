@@ -210,10 +210,13 @@ function bankBase(bank) {
  *
  * @param {*} spec - A track's `synth`, after preset expansion
  * @param {Object} Tone - The Tone.js namespace
+ * @param {Object} [track] - What the instrument will play
+ * @param {Array<Object>} [track.notes] - The track's notes: an SFZ instrument
+ *   then loads only the recordings they can sound
  * @returns {{node: Object, isLoadable: boolean}|null} `null` when the spec is
  *   not for a sampled instrument, which tells the caller to build it itself
  */
-export function create(spec, Tone) {
+export function create(spec, Tone, { notes } = {}) {
   const asked = readSpec(spec);
   if (!asked || !Tone?.Sampler) return null;
 
@@ -231,7 +234,7 @@ export function create(spec, Tone) {
 
   if (asked.kind === "sfz") {
     const { kind, ...options } = asked;
-    return { node: createSfzInstrument(Tone, options), isLoadable: true };
+    return { node: createSfzInstrument(Tone, { ...options, notes }), isLoadable: true };
   }
 
   if (asked.kind === "gm") {

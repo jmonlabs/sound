@@ -235,6 +235,12 @@ velocity layers and crossfades, round robins, key switches, release triggers
 (the bow leaving the string), choke groups, envelope, pitch LFO, filter and EQ
 are played; `sfz.js` lists the opcodes read.
 
+Only the recordings a track can play are loaded. The player hands the track's
+notes to `create`, and `regionsForNotes` keeps the regions whose keys they
+fall on and whose velocity layers they reach (give or take 2 steps). A piano
+line in the treble loads 78 of the Salamander Grand Piano's 641 recordings,
+not all 1.8 GB. Called without notes, `create` loads the whole file.
+
 Controllers move sounding notes too. A piece's controller moves (`track.cc`,
 `note.modulations`, `midi.ccN` automation lanes, gathered by io's
 `controllerEvents`) reach the instrument as `controllerChange`, and each voice
