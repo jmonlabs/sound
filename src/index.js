@@ -71,6 +71,8 @@ import {
 } from "./soundfont.js";
 
 import { createSfzInstrument } from "./sfz.js";
+import { createFaustInstrument, useFaust } from "./faust.js";
+import { createIsonInstrument, ison, isIsonSpec, performIson } from "./ison.js";
 
 import {
   analyseSustain,
@@ -82,7 +84,7 @@ import {
   sustainSampledNote,
 } from "./voices.js";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.4.0";
 
 /** MIDI note number to the note name Tone's Sampler keys its urls by. */
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -96,13 +98,14 @@ function midiToNoteName(midi) {
  *
  * Recognised: a General MIDI program number, `{ gm }` or `{ program }` with
  * the sampling options beside it, a drum kit name, `{ sfz }`, an SFZ
- * instrument (see sfz.js), and `{ sf2, program, bankSelect }`, a program of a
- * SoundFont bank (see soundfont.js). Anything else — a Tone
+ * instrument (see sfz.js), `{ sf2, program, bankSelect, variants }`, a program of a
+ * SoundFont bank (see soundfont.js), and `{ faust }`, a Faust instrument (see
+ * faust.js). Anything else — a Tone
  * class name, an inline `{ type, options }` — is not this package's business,
  * so it returns `null` and the caller builds it itself.
  *
  * @param {*} spec - A track's `synth`, after any preset has been expanded
- * @returns {{kind: 'gm'|'drums'|'drumkit'|'sfz'|'sf2', ...}|null}
+ * @returns {{kind: 'gm'|'drums'|'drumkit'|'sfz'|'sf2'|'faust', ...}|null}
  */
 export function readSpec(spec) {
   if (typeof spec === "number") return { kind: "gm", program: spec };
@@ -121,6 +124,9 @@ export function readSpec(spec) {
   }
 
   if (spec && typeof spec === "object") {
+    // An ison: an instrument said in JSON (see ison.js).
+    if (isIsonSpec(spec)) return { kind: "ison", ison: spec };
+
     if (typeof spec.sfz === "string") {
       return {
         kind: "sfz",
@@ -133,6 +139,15 @@ export function readSpec(spec) {
       };
     }
 
+    if (typeof spec.faust === "string") {
+      return {
+        kind: "faust",
+        faust: spec.faust,
+        params: spec.params,
+        voices: spec.voices,
+        volume: spec.volume,
+      };
+    }
     if (typeof spec.sf2 === "string") {
       return {
         kind: "sf2",
@@ -140,6 +155,7 @@ export function readSpec(spec) {
         program: spec.program ?? 0,
         bankSelect: spec.bankSelect ?? 0,
         controllers: spec.controllers,
+        variants: spec.variants,
       };
     }
 
@@ -226,6 +242,11 @@ export function create(spec, Tone, { notes } = {}) {
     return node ? { node, isLoadable: true } : null;
   }
 
+  if (asked.kind === "ison") {
+    const node = createIsonInstrument(Tone, asked.ison, { create, hooks: { shapeVoices, bendVoices, holdVoices }, notes });
+    return { node, isLoadable: true };
+  }
+
   if (asked.kind === "drums") {
     // A drum is a one-shot: a long release lets it ring out past a short note.
     const node = new Tone.Sampler({ urls: drumSampleUrls(asked.program, midiToNoteName), baseUrl: "", release: 4, ...(asked.options || {}) });
@@ -235,6 +256,10 @@ export function create(spec, Tone, { notes } = {}) {
   if (asked.kind === "sfz") {
     const { kind, ...options } = asked;
     return { node: createSfzInstrument(Tone, { ...options, notes }), isLoadable: true };
+  }
+  if (asked.kind === "faust") {
+    const { kind, ...options } = asked;
+    return { node: createFaustInstrument(Tone, options), isLoadable: true };
   }
 
   if (asked.kind === "gm") {
@@ -297,7 +322,12 @@ export function create(spec, Tone, { notes } = {}) {
  * @returns {Promise<string|null>} The chosen base URL, or null if none was needed
  */
 export async function prepare(specs) {
-  if (!(specs || []).some((spec) => readSpec(spec) !== null)) return null;
+  // A Faust instrument needs no samples.
+  const needsSamples = (spec) => {
+    const asked = readSpec(spec);
+    return asked !== null && asked.kind !== "faust";
+  };
+  if (!(specs || []).some(needsSamples)) return null;
   try {
     return await resolveSoundfontBase();
   } catch {
@@ -317,7 +347,7 @@ export async function prepare(specs) {
  * @returns {boolean} Whether any voice was reached
  */
 export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {
-  if (node?.isSoundfont || node?.isSfz) return node.bend(midi, startTime, anchors, baseCents);
+  if (node?.isSoundfont || node?.isSfz || node?.isFaust || node?.isIson) return node.bend(midi, startTime, anchors, baseCents);
   if (!canResample(node)) return false;
   return applyPitchAnchorsToSampler(node, midi, startTime, anchors, baseCents);
 }
@@ -334,6 +364,7 @@ export function bendVoices(node, midi, startTime, anchors, baseCents = 0) {
  * @returns {boolean} Whether any voice was made to loop
  */
 export function holdVoices(node, midi, startTime, seconds, options = {}) {
+  if (node?.isIson) return node.hold(midi, startTime, seconds, options);
   if (!canResample(node)) return false;
   return sustainSampledNote(node, midi, startTime, seconds, options);
 }
@@ -357,7 +388,7 @@ export function holdVoices(node, midi, startTime, seconds, options = {}) {
  * @returns {boolean} Whether any voice was reached
  */
 export function shapeVoices(node, midi, startTime, anchors, options = {}) {
-  if (node?.isSoundfont || node?.isSfz) return node.shape(midi, startTime, anchors, options);
+  if (node?.isSoundfont || node?.isSfz || node?.isFaust || node?.isIson) return node.shape(midi, startTime, anchors, options);
   if (!canResample(node)) return false;
   const seconds = (value) => (typeof node.toSeconds === "function" ? node.toSeconds(value) : Number(value) || 0);
   return applyAmplitudeAnchorsToSampler(node, midi, startTime, anchors, {
@@ -371,14 +402,38 @@ export function shapeVoices(node, midi, startTime, anchors, options = {}) {
  * Whether a host should play this instrument's notes as a separate attack and
  * release, and give the provider the note in between (holdVoices,
  * shapeVoices): a Sampler, whose voices can be held and shaped, a SoundFont
- * instrument, whose loudness curves become CC 11, or an SFZ instrument, whose
- * notes are voices of their own.
+ * instrument, whose loudness curves become CC 11, an SFZ instrument, whose
+ * notes are voices of their own, or a Faust instrument, whose controls move
+ * inside the DSP.
  *
  * @param {Object} node - The instrument, as returned by {@link create}
  * @returns {boolean}
  */
 export function handlesVoices(node) {
-  return canResample(node) || node?.isSoundfont === true || node?.isSfz === true;
+  return canResample(node) || node?.isSoundfont === true || node?.isSfz === true || node?.isFaust === true || node?.isIson === true;
+}
+
+/**
+ * A piece whose ison tracks are played the way their instruments say: the
+ * notes of every track whose `synth` is an ison with `play` rules go through
+ * `performIson` (strokes, variants, the shape of a stroke). Pure: a new piece,
+ * the other tracks as they were. A host calls it before it schedules anything.
+ *
+ * @param {Object} piece
+ * @returns {Object}
+ */
+export function performPiece(piece) {
+  if (!piece || !Array.isArray(piece.tracks)) return piece;
+  const tempo = piece.tempo ?? piece.bpm ?? 120;
+  let changed = false;
+  const tracks = piece.tracks.map((track) => {
+    const spec = track?.synth;
+    if (!isIsonSpec(spec) || !spec.play) return track;
+    changed = true;
+    const key = Array.isArray(track.notes) ? "notes" : "events";
+    return { ...track, [key]: performIson(spec, track[key] ?? [], { tempo }) };
+  });
+  return changed ? { ...piece, tracks } : piece;
 }
 
 /**
@@ -398,12 +453,17 @@ export const sound = {
   holdVoices,
   shapeVoices,
   handlesVoices,
+  performPiece,
+  ison,
   readSpec,
 
   // A SoundFont bank played by a real engine instead of the midi-js files.
   useSoundfont,
   soundfontInUse,
   defaultSoundfontAttack,
+
+  // Instruments written in Faust: where its compiler is, if not here.
+  useFaust,
 
   // General MIDI.
   GM_INSTRUMENTS,
@@ -452,6 +512,10 @@ export const sound = {
 
 export {
   analyseSustain,
+  useFaust,
+  performIson,
+  isIsonSpec,
+  ison,
   defaultEnvelope,
   defaultSoundfontAttack,
   soundfontInUse,

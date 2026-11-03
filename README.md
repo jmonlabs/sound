@@ -209,6 +209,57 @@ channel's pitch wheel, so two overlapping notes on one track swell and bend
 together. `controllers` sets any controller at the start, e.g. `{ 73: 100 }` for
 a softer attack; `{ gm }` tracks of bowed strings get that one by default.
 
+A bank made of one instrument often keeps its ways of playing as separate
+presets: non vibrato, vibrato, tremolo, pizzicato. `variants` names the ones a
+track wants, and a note chooses with `variant`:
+
+```js
+{ sf2: "/samples/soundfonts/Violin_LDK1609.sf2", program: 0, // non vibrato
+  variants: { vibrato: 11, tremolo: 4, pizzicato: { program: 15, bankSelect: 0 } } }
+
+{ pitch: 69, duration: 8, time: 0, variant: "vibrato" } // this note, with the recorded vibrato
+```
+
+Each variant takes a channel of the bank's synthesizer (so a track with three
+variants takes four of the fifteen), and controller moves reach them all. A
+note with no variant, or one the track does not have, plays the track's own
+program. `variant` is not an articulation: `articulations: ["vibrato"]` asks
+the compiler for a synthetic vibrato, which would double a recorded one.
+
+A bank is often far bigger than what a piece needs (a 577 MB orchestra whose
+harps are 450 of them), and the browser decodes all of it. `tools/sf2-extract.js`
+writes a new `.sf2` with only the presets named, their instruments and their
+samples, once each; `tools/sf2-presets.js` lists a bank's presets with what each
+weighs. Both run under Deno, read-only on the source:
+
+```sh
+deno run --allow-read tools/sf2-presets.js big.sf2
+deno run --allow-read --allow-write tools/sf2-extract.js big.sf2 strings.sf2 "Strings" 0:0 0:14 1:4
+```
+
+The extract plays sample for sample like the original (checked bit for bit on
+rendered notes). Keep the original: the extract is a view of it.
+
+## ison: an instrument said in JSON
+
+An instrument can be a JSON object rather than a bare spec: what sounds it
+takes (`sources`: any spec above, several if need be), the ways it is played
+(`modes`, one per preset, keyswitch or set of parameters, chosen per note with
+`variant`), how it is played (`play`: how long a bow lasts, when the vibrato
+comes, the shape of a stroke), its level and its controls by name. The format
+and its schema are at [jmonlabs/ison](https://github.com/jmonlabs/ison).
+
+```js
+const violin = await (await fetch("/instruments/violon-ldk.ison.json")).json();
+{ label: "Violon", synth: violin, notes } // a note of 8 beats is bowed in two strokes, with the recorded vibrato
+```
+
+A host plays an ison by calling `sound.performPiece(piece)` before it schedules
+(the player and the WAV render do): the `play` rules become strokes, variants
+and `dynamics` on the notes, which are then played like any other. `create`
+builds the instrument: a SoundFont source plays its modes as the variants of
+one instrument, any other source gets a node per mode.
+
 ## SFZ instruments
 
 An [SFZ](https://sfzformat.com) instrument is a text file and a folder of
@@ -256,13 +307,85 @@ automation: [{ target: "midi.cc1", anchorPoints: [
 ```
 
 A SoundFont instrument passes the same moves to its channel, plus pitch bend
-(±2 semitones) and channel pressure.
+(±2 semitones) and channel pressure. An ison names its controls, and a lane
+may target one by name (`target: "whistle"`): io resolves it to the control's
+controller number, so the same lane is the same move live, rendered, and in a
+MIDI file.
 
 WAV files are read by the package, not decoded by the browser, so they keep
 their own sample rate and the loop in their `smpl` chunk: Firefox's resampling
 at decode smears a file's last frames, and a loop ending there clicks each
 time round. Each loop's end is also crossfaded over 20 ms into what precedes
 its start. Other formats (FLAC, Ogg) go to `decodeAudioData`.
+
+## Faust instruments
+
+An instrument written in [Faust](https://faust.grame.fr) is a `.dsp` file: a
+text describing a sound, with controls. A track plays it:
+
+```js
+{ label: "Voice", synth: {
+  faust: "/instruments/voice.dsp",
+  params: { bright: 0.7 },  // the DSP's controls, at the start, optional
+  volume: -6,               // dB, optional
+} }
+```
+
+The `.dsp` is compiled in the browser the first time a track asks for it, and
+once per page however many tracks play it. Edit it, reload the page, and the
+new version plays. The compiler is
+[faustwasm](https://github.com/grame-cncm/faustwasm) (LGPL-3.0), shipped in
+`vendor/faustwasm`; it and its 6 MB are only fetched when a piece has a Faust
+track. `useFaust({ library, compiler })` points elsewhere.
+
+The DSP's `freq`, `gain` and `gate` controls play the notes, as in Faust's own
+MIDI support. A control marked `[midi:ctrl 74]` follows the piece's controller
+74 (`track.cc`, as for SFZ), one marked `[midi:pitchwheel]` its pitch bend.
+
+```faust
+import("stdfaust.lib");
+freq = hslider("freq", 220, 20, 4000, 0.01);
+gain = hslider("gain", 0.5, 0, 1, 0.01);
+gate = button("gate");
+bright = hslider("bright[midi:ctrl 74]", 0.5, 0, 1, 0.01) : si.smoo;
+process = os.sawtooth(freq) : fi.lowpass(2, 300 + 5000 * bright)
+        : *(en.adsr(0.02, 0.2, 0.7, 0.4, gate) * gain);
+```
+
+Each voice is one instance of the DSP, and each of its controls an
+AudioParam, scheduled sample by sample. A note sets its voice's `freq` to its
+exact pitch, quarter tones included; its bend (`bendVoices`) glides `freq`,
+its loudness curve (`shapeVoices`) moves `gain`. Each note's own, not the
+whole track's.
+
+- Monophonic, the default: one voice. Two notes that overlap are tied: the
+  pitch moves and `gate` stays up. Two notes that only touch start again: the
+  gate dips for 3 ms.
+- Polyphonic, with `declare options "[nvoices:8]";` (or `voices: 8` in the
+  spec, which also turns a monophonic DSP polyphonic: `voices: 2` for double
+  stops): eight voices. A note takes the voice free the longest; with none
+  free, the one that has sounded the longest, which starts again. Voices are
+  allocated here rather than by faustwasm, whose voices only take whole
+  semitones and cannot be bent one by one. If the DSP defines `effect`, as
+  Faust allows, the effect is one instance more, after the voices are mixed:
+
+```faust
+declare options "[nvoices:8]";
+process = …;                                     // one voice
+effect = re.mono_freeverb(0.7, 0.5, 0.5, 0);     // once, on the mix
+```
+
+Every voice runs all the time, sounding or not: eight voices of a heavy
+physical model cost eight times one.
+
+Compiling a DSP with a mistake prints "Aborted(... exception catching is not
+enabled ...)" in the console. It is the compiler's own noise and stops
+nothing; the mistake itself is the error the track's `loaded` rejects with.
+
+Faust's nodes and Tone's are not the same kind of node: Tone builds its graph
+with standardized-audio-context. faustwasm's nodes extend the
+`AudioWorkletNode` on `globalThis` when it loads, so it is loaded with Tone's
+in place, and its nodes join Tone's graph like any other.
 
 ## API
 
@@ -307,9 +430,10 @@ Also exported: `GM_INSTRUMENTS`, `generateSamplerUrls`, `findGMProgramByName`,
 node --test tests/*.test.js
 ```
 
-73 tests, no dependencies and no network: the CDN probe takes an injected
-`fetch`.
+95 tests, no dependencies and no network: the CDN probe takes an injected
+`fetch`, and spessasynth and faustwasm are replaced by recorders.
 
 ## License
 
-GPL-3.0-or-later
+GPL-3.0-or-later. Shipped beside it: spessasynth (Apache-2.0) in
+`vendor/spessasynth`, faustwasm (LGPL-3.0) in `vendor/faustwasm`.

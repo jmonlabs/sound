@@ -1,8 +1,8 @@
 {
   "name": "@jmon/sound",
   "private": true,
-  "version": "1.2.0",
-  "description": "Sampled instruments for jmon/algo: General MIDI, drum kits, and the voice handling a soundfont engine does. Distributed as ESM source via jsDelivr from GitHub — no build, no npm publish.",
+  "version": "1.4.0",
+  "description": "Sampled instruments for jmon/algo: General MIDI, drum kits, SoundFont and SFZ instruments, the voice handling a soundfont engine does, and instruments written in Faust. Distributed as ESM source via jsDelivr from GitHub — no build, no npm publish.",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "author": "JMON Labs",
@@ -21,6 +21,7 @@
     "sampler",
     "fluidr3",
     "drum-kits",
+    "faust",
     "jmon",
     "tone.js",
     "web-audio"

@@ -23,6 +23,14 @@
  *   - `{ sf2: "…/bank.sf2", program: 40, bankSelect: 0 }`: any bank, per track, so
  *     one piece can take its violin from one bank and its piano from another.
  *
+ * A track may add `variants`, other presets of the same bank for other ways of
+ * playing: `{ sf2, program: 0, variants: { vibrato: 11, pizzicato: { program: 15,
+ * bankSelect: 1 } } }`. Each variant takes a channel of its own, and a note
+ * that names one (`variant: "vibrato"`) plays there; the rest play the track's
+ * program. Controller moves reach every channel. The note's `articulations`
+ * are left to the compiler: a `vibrato` articulation is a synthetic one, which
+ * a recorded vibrato would double.
+ *
  * Each bank file has a synthesizer of its own, so every bank keeps its own
  * bank numbers and 15 channels.
  */
@@ -115,8 +123,12 @@ export function defaultSoundfontAttack(program) {
  * @param {number} [preset.bankSelect=0] - the bank number inside the file,
  *   where a bank keeps variations of its programs
  * @param {Object} [preset.controllers] - controller number → 0..127
+ * @param {Object} [preset.variants] - other presets of the bank by name, for
+ *   notes whose `variant` names them: a program number, or
+ *   `{ program, bankSelect }`. Each takes a channel; one the synthesizer has no
+ *   channel left for plays the track's program, with a warning.
  */
-export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {}, drums = false }) {
+export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {}, drums = false, variants = {} }) {
   if (!Tone?.getContext) return null;
   const url = bank ?? settings?.bank;
   if (!url) return null;
@@ -125,14 +137,28 @@ export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0,
   // A drum kit takes General MIDI's drum channel when it is free, and any
   // other channel switched to drums when it is not.
   const order = drums ? [DRUM_CHANNEL, ...CHANNELS] : CHANNELS;
-  const channel = order.find((c) => !entry.channels.has(c));
+  const take = () => {
+    const channel = order.find((c) => !entry.channels.has(c));
+    if (channel !== undefined) entry.channels.add(channel);
+    return channel;
+  };
+  const channel = take();
   if (channel === undefined) return null;
-  entry.channels.add(channel);
+  const taken = {};
+  for (const [name, variant] of Object.entries(variants ?? {})) {
+    const own = take();
+    if (own === undefined) {
+      console.warn(`[soundfont] no channel left for the variant "${name}": its notes play the track's program`);
+      continue;
+    }
+    const preset = typeof variant === "number" ? { program: variant } : variant;
+    taken[name] = { channel: own, program: preset.program ?? program, bankSelect: preset.bankSelect ?? bankSelect };
+  }
   const familyAttack = bank === undefined && !drums ? { 73: defaultSoundfontAttack(program) } : {};
   return new SoundfontInstrument(Tone, context, entry, channel, program, bankSelect, {
     ...familyAttack,
     ...controllers,
-  }, drums);
+  }, drums, taken);
 }
 
 function sharedFor(context, url) {
@@ -180,10 +206,17 @@ function midiValue(value) {
  * triggerRelease, triggerAttackRelease, releaseAll, dispose).
  */
 class SoundfontInstrument {
-  constructor(Tone, context, entry, channel, program, bankSelect, controllers, drums = false) {
+  constructor(Tone, context, entry, channel, program, bankSelect, controllers, drums = false, variants = {}) {
     this.Tone = Tone;
     this.context = context;
     this.channel = channel;
+    // The variants' channels by name (see createSoundfontInstrument), and
+    // every channel of the track, the main one first.
+    this.variants = variants;
+    this.channels = [channel, ...Object.values(variants).map((v) => v.channel)];
+    // Which channel each sounding note plays on, by MIDI note: a release, a
+    // loudness curve or a bend must reach the channel the note was sent to.
+    this.sounding = new Map();
     this.isSoundfont = true;
     this.disposed = false;
     this.shaped = false;
@@ -194,19 +227,37 @@ class SoundfontInstrument {
     this.loaded = entry.ready.then((synth) => {
       if (this.disposed) return;
       this.synth = synth;
-      synth.connectChannel(this.output.input, channel);
-      if (drums && channel !== DRUM_CHANNEL) synth.midiChannels[channel].setDrums(true);
-      if (bankSelect) synth.controllerChange(channel, 0, bankSelect);
-      synth.programChange(channel, program);
-      // Room for a glissando of an octave either way (see bend).
-      synth.pitchWheelRange(channel, BEND_RANGE);
-      // Dry: the track's bus and the piece's reverb do the room.
-      synth.controllerChange(channel, 91, 0);
-      synth.controllerChange(channel, 93, 0);
-      for (const [controller, value] of Object.entries(controllers)) {
-        synth.controllerChange(channel, Number(controller), value);
+      const presets = [{ channel, program, bankSelect }, ...Object.values(variants)];
+      for (const preset of presets) {
+        synth.connectChannel(this.output.input, preset.channel);
+        if (drums && preset.channel !== DRUM_CHANNEL) synth.midiChannels[preset.channel].setDrums(true);
+        if (preset.bankSelect) synth.controllerChange(preset.channel, 0, preset.bankSelect);
+        synth.programChange(preset.channel, preset.program);
+        // Room for a glissando of an octave either way (see bend).
+        synth.pitchWheelRange(preset.channel, BEND_RANGE);
+        // Dry: the track's bus and the piece's reverb do the room.
+        synth.controllerChange(preset.channel, 91, 0);
+        synth.controllerChange(preset.channel, 93, 0);
+        for (const [controller, value] of Object.entries(controllers)) {
+          synth.controllerChange(preset.channel, Number(controller), value);
+        }
       }
     });
+  }
+
+  /**
+   * The channel a note plays on: its variant's, or the track's own channel.
+   *
+   * @param {{variant?: string}} [options]
+   */
+  channelFor(options) {
+    const name = options?.variant;
+    return name && this.variants[name] ? this.variants[name].channel : this.channel;
+  }
+
+  /** The channel a sounding note was sent to, or the track's own. */
+  channelOf(midi) {
+    return this.sounding.get(midi) ?? this.channel;
   }
 
   connect(destination) {
@@ -238,26 +289,44 @@ class SoundfontInstrument {
     return typeof time === "number" ? time : this.Tone.Time(time).toSeconds();
   }
 
-  triggerAttack(notes, time, velocity = 1) {
+  /**
+   * @param {*} notes - a note name, frequency or MIDI number, or a list
+   * @param {number|string} [time]
+   * @param {number} [velocity=1]
+   * @param {number} [_duration] - unused: the host releases the note itself
+   * @param {Object} [options]
+   * @param {string} [options.variant] - the variant the note asks for (see
+   *   channelFor)
+   */
+  triggerAttack(notes, time, velocity = 1, _duration, options) {
     if (!this.synth) return this;
     const at = this.timeOf(time);
+    const channel = this.channelFor(options);
     // A note with no loudness curve starts at rest, not at the last one's level.
-    if (this.shaped) this.synth.controllerChange(this.channel, 11, 127, { time: at });
+    if (this.shaped) this.synth.controllerChange(channel, 11, 127, { time: at });
     const vel = Math.max(1, Math.min(127, Math.round(velocity * 127)));
-    for (const note of [].concat(notes)) this.synth.noteOn(this.channel, this.midiOf(note), vel, { time: at });
+    for (const note of [].concat(notes)) {
+      const midi = this.midiOf(note);
+      this.sounding.set(midi, channel);
+      this.synth.noteOn(channel, midi, vel, { time: at });
+    }
     return this;
   }
 
   triggerRelease(notes, time) {
     if (!this.synth) return this;
     const at = this.timeOf(time);
-    for (const note of [].concat(notes)) this.synth.noteOff(this.channel, this.midiOf(note), { time: at });
+    for (const note of [].concat(notes)) {
+      const midi = this.midiOf(note);
+      this.synth.noteOff(this.channelOf(midi), midi, { time: at });
+      this.sounding.delete(midi);
+    }
     return this;
   }
 
-  triggerAttackRelease(notes, duration, time, velocity = 1) {
+  triggerAttackRelease(notes, duration, time, velocity = 1, options) {
     const at = this.timeOf(time);
-    this.triggerAttack(notes, at, velocity);
+    this.triggerAttack(notes, at, velocity, undefined, options);
     this.triggerRelease(notes, at + this.timeOf(duration));
     return this;
   }
@@ -289,13 +358,15 @@ class SoundfontInstrument {
       return points.at(-1).value;
     };
     this.shaped = true;
+    const channel = this.channelOf(midi);
     let last = -1;
     for (let t = 0; t < seconds; t += 0.03) {
       const value = Math.round(levelAt(t) * 127);
-      if (value !== last) this.synth.controllerChange(this.channel, 11, value, { time: startTime + t });
+      if (value !== last) this.synth.controllerChange(channel, 11, value, { time: startTime + t });
       last = value;
     }
-    this.synth.noteOff(this.channel, midi, { time: startTime + seconds });
+    this.synth.noteOff(channel, midi, { time: startTime + seconds });
+    this.sounding.delete(midi);
     return true;
   }
 
@@ -305,7 +376,7 @@ class SoundfontInstrument {
    * curve. The wheel is the channel's: two overlapping notes on one track bend
    * together, which a monophonic line never does.
    *
-   * @param {number} midi - unused: the channel bends as a whole
+   * @param {number} midi - says which channel: the whole channel bends
    * @param {number} startTime - seconds
    * @param {Array<{time:number,value:number}>} anchors - seconds from the
    *   start, cents from the written pitch
@@ -325,16 +396,17 @@ class SoundfontInstrument {
       return anchors.at(-1).value;
     };
     const end = anchors.at(-1).time;
+    const channel = this.channelOf(midi);
     let last = -1;
     for (let t = Math.max(0, anchors[0].time); t <= end; t += 0.02) {
       const value = wheel(centsAt(t));
-      if (value !== last) this.synth.pitchWheel(this.channel, value, { time: startTime + t });
+      if (value !== last) this.synth.pitchWheel(channel, value, { time: startTime + t });
       last = value;
     }
     // The arrival itself: steps of 20 ms need not land on the curve's end.
     const arrival = wheel(centsAt(end));
-    if (arrival !== last) this.synth.pitchWheel(this.channel, arrival, { time: startTime + end });
-    this.synth.pitchWheel(this.channel, 8192, { time: startTime + end + 0.05 });
+    if (arrival !== last) this.synth.pitchWheel(channel, arrival, { time: startTime + end });
+    this.synth.pitchWheel(channel, 8192, { time: startTime + end + 0.05 });
     return true;
   }
 
@@ -349,7 +421,9 @@ class SoundfontInstrument {
    */
   controllerChange(controller, value, time) {
     if (!this.synth) return this;
-    this.synth.controllerChange(this.channel, controller, midiValue(value), { time: this.timeOf(time) });
+    for (const channel of this.channels) {
+      this.synth.controllerChange(channel, controller, midiValue(value), { time: this.timeOf(time) });
+    }
     return this;
   }
 
@@ -360,31 +434,34 @@ class SoundfontInstrument {
   pitchBend(value, time) {
     if (!this.synth) return this;
     const wheel = Math.round(8192 + Math.max(-1, Math.min(1, value)) * (2 / BEND_RANGE) * 8191);
-    this.synth.pitchWheel(this.channel, wheel, { time: this.timeOf(time) });
+    for (const channel of this.channels) this.synth.pitchWheel(channel, wheel, { time: this.timeOf(time) });
     return this;
   }
 
   /** Channel pressure (aftertouch) from the piece, 0..1. */
   channelPressure(value, time) {
     if (!this.synth) return this;
-    this.synth.channelPressure(this.channel, midiValue(value), { time: this.timeOf(time) });
+    for (const channel of this.channels) this.synth.channelPressure(channel, midiValue(value), { time: this.timeOf(time) });
     return this;
   }
 
   releaseAll() {
-    this.synth?.controllerChange(this.channel, 123, 0);
+    for (const channel of this.channels) this.synth?.controllerChange(channel, 123, 0);
+    this.sounding.clear();
     return this;
   }
 
   dispose() {
     if (this.disposed) return this;
     this.disposed = true;
-    if (this.synth) {
-      this.synth.controllerChange(this.channel, 120, 0); // all sound off
-      this.synth.controllerChange(this.channel, 121, 0); // reset controllers
-      try { this.synth.disconnectChannel(this.output.input, this.channel); } catch { /* already */ }
+    for (const channel of this.channels) {
+      if (this.synth) {
+        this.synth.controllerChange(channel, 120, 0); // all sound off
+        this.synth.controllerChange(channel, 121, 0); // reset controllers
+        try { this.synth.disconnectChannel(this.output.input, channel); } catch { /* already */ }
+      }
+      this._entry.channels.delete(channel);
     }
-    this._entry.channels.delete(this.channel);
     this.output.dispose();
     return this;
   }

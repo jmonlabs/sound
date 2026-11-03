@@ -192,3 +192,65 @@ test("the synthesizer's processor loads even when another module came first, onc
   assert.deepEqual(raw.audioWorklet.loaded, ["processor.js"]);
   sound.useSoundfont(false);
 });
+
+test("variants: other presets of the bank, one channel each, chosen by a note's variant", async () => {
+  sound.useSoundfont({ library, processor: "processor.js" });
+  sent.length = 0;
+  const Tone = fakeTone();
+  try {
+  const { node } = sound.create({ sf2: "violin.sf2", program: 0, variants: { vibrato: 11, pizzicato: { program: 15, bankSelect: 1 } } }, Tone);
+  assert.equal(node.channel, 0);
+  assert.deepEqual(node.channels, [0, 1, 2]);
+  await node.loaded;
+  const programs = sent.filter((m) => m[0] === "program" || (m[0] === "cc" && m[2] === 0));
+  assert.deepEqual(programs, [["program", 0, 0], ["program", 1, 11], ["cc", 2, 0, 1, undefined], ["program", 2, 15]], "each channel gets its preset");
+  assert.equal(sent.filter((m) => m[0] === "connect").length, 3, "every channel feeds the track's output");
+
+  sent.length = 0;
+  node.triggerAttack(69, 1, 0.5, 2, { variant: "vibrato" });
+  node.triggerRelease(69, 3);
+  node.triggerAttack(71, 1, 0.5, 2, { variant: "pizzicato" });
+  node.triggerAttack(72, 1, 0.5, 2, { variant: "legato" }); // no variant of that name
+  node.triggerAttack(74, 1, 0.5, 2);
+  assert.deepEqual(sent, [
+    ["on", 1, 69, 64, 1], ["off", 1, 69, 3],
+    ["on", 2, 71, 64, 1],
+    ["on", 0, 72, 64, 1],
+    ["on", 0, 74, 64, 1],
+  ], "a note plays on its variant's channel, else the track's");
+
+  sent.length = 0;
+  node.shape(71, 1, [{ time: 0, value: 1 }, { time: 1, value: 0.5 }], { seconds: 1 });
+  assert.equal(sent.at(-1)[1], 2, "a loudness curve and the release reach the note's channel");
+  sent.length = 0;
+  node.controllerChange(1, 0.5, 4);
+  assert.deepEqual(sent.map((m) => m[1]), [0, 1, 2], "a controller move reaches every channel");
+  sent.length = 0;
+  node.dispose();
+  assert.deepEqual(sent.filter((m) => m[0] === "disconnect").map((m) => m[1]), [0, 1, 2]);
+  assert.equal(sound.create({ sf2: "violin.sf2", program: 0 }, Tone).node.channel, 0, "a disposed track frees all its channels");
+  } finally {
+    sound.useSoundfont(null);
+  }
+});
+
+test("variants: a variant with no channel left plays the track's program, with a warning", async () => {
+  sound.useSoundfont({ library, processor: "processor.js" });
+  const Tone = fakeTone();
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (m) => warnings.push(m);
+  try {
+    Array.from({ length: 14 }, () => sound.create({ sf2: "full.sf2", program: 0 }, Tone));
+    const { node } = sound.create({ sf2: "full.sf2", program: 0, variants: { vibrato: 11 } }, Tone);
+    assert.deepEqual(node.channels, [15]);
+    assert.equal(warnings.length, 1);
+    await node.loaded;
+    sent.length = 0;
+    node.triggerAttack(69, 1, 0.5, 2, { variant: "vibrato" });
+    assert.deepEqual(sent, [["on", 15, 69, 64, 1]]);
+  } finally {
+    console.warn = warn;
+    sound.useSoundfont(null);
+  }
+});
