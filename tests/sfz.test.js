@@ -185,7 +185,7 @@ test("the envelope level is a linear attack, a hold, and a decay towards the sus
 test("an SFZ spec is read, and its instrument handles its own voices", () => {
   assert.deepEqual(sound.readSpec({ sfz: "violin.sfz", staccato: "violin-staccato.sfz", envelope: { attack: 0.2 } }), {
     kind: "sfz", sfz: "violin.sfz", staccato: "violin-staccato.sfz", staccatoUnder: undefined,
-    envelope: { attack: 0.2 }, volume: undefined, controllers: undefined,
+    envelope: { attack: 0.2 }, volume: undefined, controllers: undefined, start: undefined,
   });
   assert.equal(sound.handlesVoices({ isSfz: true }), true);
 });

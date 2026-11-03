@@ -123,12 +123,15 @@ export function defaultSoundfontAttack(program) {
  * @param {number} [preset.bankSelect=0] - the bank number inside the file,
  *   where a bank keeps variations of its programs
  * @param {Object} [preset.controllers] - controller number → 0..127
+ * @param {number} [preset.start] - seconds of every recording skipped at the
+ *   start of a note: where a recording takes time to speak (a bow catching the
+ *   string), the note starts already sounding. A variant may have its own.
  * @param {Object} [preset.variants] - other presets of the bank by name, for
  *   notes whose `variant` names them: a program number, or
  *   `{ program, bankSelect }`. Each takes a channel; one the synthesizer has no
  *   channel left for plays the track's program, with a warning.
  */
-export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {}, drums = false, variants = {} }) {
+export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0, controllers = {}, drums = false, variants = {}, start = 0 }) {
   if (!Tone?.getContext) return null;
   const url = bank ?? settings?.bank;
   if (!url) return null;
@@ -152,13 +155,13 @@ export function createSoundfontInstrument(Tone, { program, bank, bankSelect = 0,
       continue;
     }
     const preset = typeof variant === "number" ? { program: variant } : variant;
-    taken[name] = { channel: own, program: preset.program ?? program, bankSelect: preset.bankSelect ?? bankSelect };
+    taken[name] = { channel: own, program: preset.program ?? program, bankSelect: preset.bankSelect ?? bankSelect, start: preset.start ?? start };
   }
   const familyAttack = bank === undefined && !drums ? { 73: defaultSoundfontAttack(program) } : {};
   return new SoundfontInstrument(Tone, context, entry, channel, program, bankSelect, {
     ...familyAttack,
     ...controllers,
-  }, drums, taken);
+  }, drums, taken, start, url);
 }
 
 function sharedFor(context, url) {
@@ -195,6 +198,36 @@ async function startSynth(context, bank) {
   return synth;
 }
 
+/**
+ * Skip the first `samples` of every recording a channel plays.
+ *
+ * The SoundFont 2.01 NRPN: parameter MSB 120 says "a generator", LSB 0 names
+ * startAddrsOffset, and the data entry is the offset added to the preset's,
+ * 8192 being none. 8191 samples at most (0.19 s at 44.1 kHz).
+ */
+function skipStart(synth, channel, samples) {
+  const value = 8192 + Math.max(0, Math.min(8191, samples));
+  synth.controllerChange(channel, 99, 120); // NRPN MSB: a SoundFont generator
+  synth.controllerChange(channel, 98, 0); // NRPN LSB: startAddrsOffset
+  synth.controllerChange(channel, 6, value >> 7); // data entry MSB
+  synth.controllerChange(channel, 38, value & 127); // data entry LSB
+}
+
+/** The sample rate of a bank's recordings, read from its first sample header (44100 if it cannot be read). */
+async function sampleRateOf(bank) {
+  try {
+    const bytes = new Uint8Array(await bankBytes.get(bank));
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let at = 12; at + 8 < bytes.length; at++) {
+      if (bytes[at] === 0x73 && bytes[at + 1] === 0x68 && bytes[at + 2] === 0x64 && bytes[at + 3] === 0x72) { // "shdr"
+        const rate = view.getUint32(at + 8 + 36, true);
+        if (rate > 0) return rate;
+      }
+    }
+  } catch { /* the default below */ }
+  return 44100;
+}
+
 /** A proportion as a 7-bit MIDI value. */
 function midiValue(value) {
   return Math.max(0, Math.min(127, Math.round(value * 127)));
@@ -206,7 +239,7 @@ function midiValue(value) {
  * triggerRelease, triggerAttackRelease, releaseAll, dispose).
  */
 class SoundfontInstrument {
-  constructor(Tone, context, entry, channel, program, bankSelect, controllers, drums = false, variants = {}) {
+  constructor(Tone, context, entry, channel, program, bankSelect, controllers, drums = false, variants = {}, start = 0, bank = null) {
     this.Tone = Tone;
     this.context = context;
     this.channel = channel;
@@ -224,10 +257,11 @@ class SoundfontInstrument {
     this.synth = null;
     this._entry = entry;
     // What the host awaits before scheduling, like a Sampler's buffers.
-    this.loaded = entry.ready.then((synth) => {
+    this.loaded = entry.ready.then(async (synth) => {
       if (this.disposed) return;
       this.synth = synth;
-      const presets = [{ channel, program, bankSelect }, ...Object.values(variants)];
+      const presets = [{ channel, program, bankSelect, start }, ...Object.values(variants)];
+      const rate = presets.some((preset) => preset.start > 0) ? await sampleRateOf(bank) : 0;
       for (const preset of presets) {
         synth.connectChannel(this.output.input, preset.channel);
         if (drums && preset.channel !== DRUM_CHANNEL) synth.midiChannels[preset.channel].setDrums(true);
@@ -241,6 +275,7 @@ class SoundfontInstrument {
         for (const [controller, value] of Object.entries(controllers)) {
           synth.controllerChange(preset.channel, Number(controller), value);
         }
+        if (preset.start > 0) skipStart(synth, preset.channel, Math.round(preset.start * rate));
       }
     });
   }

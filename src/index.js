@@ -136,6 +136,7 @@ export function readSpec(spec) {
         envelope: spec.envelope,
         volume: spec.volume,
         controllers: spec.controllers,
+        start: spec.start,
       };
     }
 
@@ -156,6 +157,7 @@ export function readSpec(spec) {
         bankSelect: spec.bankSelect ?? 0,
         controllers: spec.controllers,
         variants: spec.variants,
+        start: spec.start,
       };
     }
 

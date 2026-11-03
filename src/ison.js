@@ -238,13 +238,14 @@ class IsonInstrument {
         const variants = {};
         for (const [name, mode] of list) {
           if (name === mainName) continue;
-          variants[name] = { program: mode.program ?? source.program ?? 0, bankSelect: mode.bankSelect ?? source.bankSelect ?? 0 };
+          variants[name] = { program: mode.program ?? source.program ?? 0, bankSelect: mode.bankSelect ?? source.bankSelect ?? 0, start: mode.start ?? source.start ?? 0 };
         }
         const made = create?.({
           sf2: source.sf2,
           program: main.program ?? source.program ?? 0,
           bankSelect: main.bankSelect ?? source.bankSelect ?? 0,
           controllers: { ...(source.controllers ?? {}), ...controllerDefaults(ison) },
+          start: main.start ?? source.start ?? 0,
           variants,
         }, Tone, { notes });
         if (made?.node) this.register(made.node, list.map(([n]) => n));
@@ -262,7 +263,7 @@ class IsonInstrument {
   buildOne(source, mode, { create, notes }) {
     const ison = this.ison;
     if (typeof source.sfz === "string") {
-      const spec = { ...source, envelope: ison.envelope ?? source.envelope, controls: { ...(source.controls ?? {}), ...(mode.controls ?? {}) } };
+      const spec = { ...source, envelope: ison.envelope ?? source.envelope, start: mode.start ?? source.start, controls: { ...(source.controls ?? {}), ...(mode.controls ?? {}) } };
       if (mode.keyswitch !== undefined) spec.keyswitch = mode.keyswitch;
       return create?.(spec, this.Tone, { notes })?.node ?? null;
     }

@@ -254,3 +254,21 @@ test("variants: a variant with no channel left plays the track's program, with a
     sound.useSoundfont(null);
   }
 });
+
+test("start: the first seconds of every recording are skipped, per channel, with the SoundFont NRPN", async () => {
+  sound.useSoundfont({ library, processor: "processor.js" });
+  sent.length = 0;
+  const Tone = fakeTone();
+  try {
+    const { node } = sound.create({ sf2: "violin.sf2", program: 0, start: 0.1, variants: { vibrato: { program: 11, start: 0.05 }, pizzicato: 15 } }, Tone);
+    await node.loaded;
+    const nrpn = (channel) => sent.filter((m) => m[0] === "cc" && m[1] === channel && [99, 98, 6, 38].includes(m[2])).map((m) => [m[2], m[3]]);
+    // 0.1 s at 44.1 kHz (the fake bank cannot be read): 4410 samples, sent as 8192 + 4410.
+    assert.deepEqual(nrpn(0), [[99, 120], [98, 0], [6, (8192 + 4410) >> 7], [38, (8192 + 4410) & 127]]);
+    assert.deepEqual(nrpn(1), [[99, 120], [98, 0], [6, (8192 + 2205) >> 7], [38, (8192 + 2205) & 127]], "a variant has its own");
+    assert.deepEqual(nrpn(2), [[99, 120], [98, 0], [6, (8192 + 4410) >> 7], [38, (8192 + 4410) & 127]], "a variant without one takes the track's");
+    node.dispose();
+  } finally {
+    sound.useSoundfont(null);
+  }
+});

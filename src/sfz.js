@@ -435,13 +435,15 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null }) {
+  constructor(Tone, { sfz, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
     this.output = new Tone.Gain(1);
     this.envelope = envelope;
     this.volume = volume;
+    // Seconds of every recording skipped at the start of a note, over the regions' own `offset`.
+    this.start = start;
     this.staccatoUnder = staccatoUnder;
     this.random = seededRandom(1);
     this.voices = [];
@@ -729,7 +731,7 @@ class SfzInstrument {
       vibrato.oscillator.start(start);
     }
 
-    source.start(start, Math.min(plan.offset / frameRate, buffer.duration));
+    source.start(start, Math.min(plan.offset / frameRate + this.start, buffer.duration));
     const voice = {
       key, velocity, start, plan, file, region, source, rate, level, shape: shapeGain.gain, vibrato,
       control: controlGain, cutoff, controlledBy: controlledBy(region),
