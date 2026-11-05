@@ -184,3 +184,63 @@ test("performIson: with a grid, the strokes are cut on the piece's grid, every v
   assert.equal(whole.length, 1, "a note that sits on the grid is one stroke");
   assert.deepEqual(whole[0].dynamics, [1, 0.5], "and keeps its own dynamics");
 });
+
+const ether = {
+  format: "ison",
+  version: "1.0",
+  name: "Éther",
+  sources: { low: { type: "FMSynth" }, high: { type: "FMSynth", options: { harmonicity: 3 } } },
+  modes: {
+    ether: { layers: [
+      { mode: "body" },
+      { mode: "light", transpose: 19, db: -12, delay: 0.5, spread: { cents: 10, delay: 0.2 } },
+    ] },
+    body: { source: "low", pan: -0.3 },
+    light: { source: "high", pan: 0.4 },
+  },
+  controls: { shimmer: { cc: 20, mode: "light", default: 0.5 } },
+};
+
+test("performIson: a note in a mode of layers becomes one note per layer, the same on every play", () => {
+  const notes = [{ pitch: 60, time: 4, duration: 8, velocity: 0.8 }];
+  const once = sound.performIson(ether, notes, { tempo: 120 });
+  assert.deepEqual(once.map((n) => n.variant), ["body", "light"]);
+  const [body, light] = once;
+  assert.equal(body.pitch, 60);
+  assert.equal(body.time, 4);
+  assert.equal(light.pitch, 79, "19 semitones up");
+  assert.ok(light.time >= 5 && light.time <= 5.4, "0.5 s later (1 beat at 120), plus at most 0.2 s of spread");
+  assert.ok(Math.abs(light.time + light.duration - 12) < 1e-9, "the layers end together");
+  assert.ok(Math.abs(light.velocity - 0.8 * Math.pow(10, -12 / 20)) < 1e-9);
+  assert.ok(Math.abs(light.tuning ?? 0) <= 0.1 + 1e-9, "within 10 cents");
+  assert.deepEqual(sound.performIson(ether, notes, { tempo: 120 }), once, "the spread is the same on every play");
+  const other = sound.performIson(ether, [{ pitch: 62, time: 4, duration: 8, velocity: 0.8 }], { tempo: 120 })[1];
+  assert.notEqual(other.time - 4, light.time - 4, "another note, another spread");
+});
+
+test("performPiece layers an ison track even without play rules", () => {
+  const piece = { tempo: 120, tracks: [{ label: "Ether", synth: ether, notes: [{ pitch: 60, time: 0, duration: 4 }] }] };
+  assert.equal(sound.performPiece(piece).tracks[0].notes.length, 2);
+});
+
+test("a mode of layers builds no sound of its own; a control turns a mode's level; two layers on one pitch end apart", () => {
+  const Tone = fakeTone();
+  class Panner { constructor(pan) { this.pan = pan; } connect() { return this; } dispose() {} }
+  Tone.Panner = Panner;
+  Tone.now = () => 0;
+  const notes = sound.performIson(ether, [{ pitch: 60, time: 0, duration: 4 }], { tempo: 120 });
+  const { node } = sound.create(ether, Tone, { notes });
+  assert.equal(node.nodes.length, 2, "body and light, not ether");
+  assert.equal(node.levels.light.gain, 0.5, "the control's default");
+  let ramped = null;
+  node.levels.light.gain = { linearRampToValueAtTime: (v, t) => { ramped = [v, t]; } };
+  node.controllerChange(20, 0.9, 1);
+  assert.deepEqual(ramped, [0.9, 1.05]);
+  // two layers on the same pitch: each release reaches its own node
+  node.triggerAttack(60, 0, 0.8, 4, { variant: "body" });
+  node.triggerAttack(60, 0.5, 0.8, 4, { variant: "light" });
+  node.triggerRelease(60, 4);
+  node.triggerRelease(60, 4.5);
+  assert.deepEqual(node.byMode.body.played.at(-1), ["off", 4]);
+  assert.deepEqual(node.byMode.light.played.at(-1), ["off", 4.5]);
+});

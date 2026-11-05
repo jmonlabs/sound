@@ -71,6 +71,13 @@ export function defaultMode(ison) {
  *   takes (attack, swell, peak, fade), as the note's `dynamics`; a note that
  *   has its own keeps it.
  *
+ * A note whose mode has `layers` then becomes one note per layer, each in the
+ * layer's mode: `transpose` semitones away, `delay` seconds later (and as much
+ * shorter, so the layers end together), `db` louder or softer (through the
+ * velocity), `detune` cents off. `spread` (`{ cents, delay }`) moves each
+ * layer of each note by a different amount within those bounds, the same on
+ * every play: two notes never sound quite alike.
+ *
  * @param {Object} ison
  * @param {Array} notes - JMON notes
  * @param {{tempo?: number}} [options] - the piece's tempo, to turn the
@@ -130,10 +137,54 @@ export function performIson(ison, notes, { tempo = 120 } = {}) {
     for (const stroke of strokes) {
       if (!stroke.variant && vibrato && stroke.duration >= (vibrato.from ?? 0)) stroke.variant = vibrato.mode;
       if (play.stroke && !stroke.dynamics) stroke.dynamics = strokeShape(stroke.duration, play.stroke);
-      out.push(stroke);
+      const layers = modes[stroke.variant ?? base]?.layers;
+      if (Array.isArray(layers) && layers.length > 0) out.push(...layered(stroke, layers, modes, tempo));
+      else out.push(stroke);
     }
   }
   return out;
+}
+
+/** One note per layer of its mode (see performIson). */
+function layered(note, layers, modes, tempo) {
+  const out = [];
+  layers.forEach((layer, index) => {
+    if (!layer?.mode || !modes[layer.mode] || modes[layer.mode].layers) return;
+    const random = seeded(`${note.time}:${note.pitch}:${index}`);
+    const spreadCents = (layer.spread?.cents ?? 0) * (2 * random() - 1);
+    const spreadDelay = (layer.spread?.delay ?? 0) * random();
+    const delayBeats = (((layer.delay ?? 0) + spreadDelay) * tempo) / 60;
+    const duration = note.duration - delayBeats;
+    if (!(duration > 0.05)) return;
+    const cents = (layer.detune ?? 0) + spreadCents;
+    out.push({
+      ...note,
+      variant: layer.mode,
+      pitch: note.pitch + (layer.transpose ?? 0),
+      time: note.time + delayBeats,
+      duration,
+      velocity: Math.min(1, (note.velocity ?? 0.8) * Math.pow(10, (layer.db ?? 0) / 20)),
+      ...(cents ? { tuning: (note.tuning ?? 0) + cents / 100 } : {}),
+    });
+  });
+  return out;
+}
+
+/** A little random generator from a text: the same text, the same numbers. */
+function seeded(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+/** Whether an ison has a mode made of layers. */
+export function hasLayers(ison) {
+  return Object.values(ison?.modes ?? {}).some((mode) => Array.isArray(mode?.layers) && mode.layers.length > 0);
 }
 
 /**
@@ -208,14 +259,15 @@ class IsonInstrument {
 
     const sources = ison.sources ?? {};
     const sourceNames = Object.keys(sources);
-    let modes = Object.entries(ison.modes ?? {});
+    let modes = Object.entries(ison.modes ?? {}).filter(([, mode]) => !mode?.layers); // a mode of layers has no sound of its own
     if (modes.length === 0 && sourceNames.length > 0) modes.push([sourceNames[0], { source: sourceNames[0] }]);
     const base = ison.mode ?? modes[0]?.[0];
     // Only the modes the track's notes ask for are built: a synth runs whether
     // it plays or not, and a SoundFont variant takes a channel. Without the
     // notes, every mode.
     if (Array.isArray(notes)) {
-      const asked = new Set([base, ...notes.map((note) => note?.variant).filter(Boolean)]);
+      const layersOf = (name) => (ison.modes?.[name]?.layers ?? []).map((layer) => layer.mode);
+      const asked = new Set([base, ...layersOf(base), ...notes.map((note) => note?.variant).filter(Boolean)]);
       modes = modes.filter(([name]) => asked.has(name));
     }
 
@@ -248,12 +300,12 @@ class IsonInstrument {
           start: main.start ?? source.start ?? 0,
           variants,
         }, Tone, { notes });
-        if (made?.node) this.register(made.node, list.map(([n]) => n));
+        if (made?.node) this.register(made.node, list.map(([n]) => n), main);
         continue;
       }
       for (const [name, mode] of list) {
         const node = this.buildOne(source, mode, { create, notes });
-        if (node) this.register(node, [name]);
+        if (node) this.register(node, [name], mode);
       }
     }
     this.loaded = Promise.all(this.nodes.map((node) => node.loaded ?? null)).then(() => undefined);
@@ -279,8 +331,27 @@ class IsonInstrument {
     return create?.(spec, this.Tone, { notes })?.node ?? null;
   }
 
-  register(node, modeNames) {
-    node.connect(this.output);
+  /**
+   * A node into the output. A mode with a `pan`, or a level that a control
+   * turns, goes through its own gain and panner first.
+   */
+  register(node, modeNames, mode = {}) {
+    const controlled = Object.values(this.ison.controls ?? {}).filter((control) => modeNames.includes(control?.mode));
+    let out = node;
+    if (controlled.length > 0 || typeof mode.pan === "number") {
+      const level = new this.Tone.Gain(controlled.length > 0 ? controlled[0].default ?? 1 : 1);
+      node.connect(level);
+      out = level;
+      for (const name of modeNames) (this.levels ??= {})[name] = level;
+      if (typeof mode.pan === "number" && this.Tone.Panner) {
+        const panner = new this.Tone.Panner(mode.pan);
+        level.connect(panner);
+        out = panner;
+        (this.extra ??= []).push(panner);
+      }
+      (this.extra ??= []).push(level);
+    }
+    out.connect(this.output);
     this.nodes.push(node);
     for (const name of modeNames) this.byMode[name] = node;
   }
@@ -290,9 +361,22 @@ class IsonInstrument {
     return (variant && this.byMode[variant]) || this.byMode[defaultMode(this.ison)] || this.nodes[0] || null;
   }
 
-  /** The node a sounding note was sent to. */
+  /** The node a sounding note was sent to: the oldest still sounding at that pitch. */
   nodeOf(midi) {
-    return this.sounding.get(midi) ?? this.nodeFor();
+    return this.sounding.get(midi)?.[0] ?? this.nodeFor();
+  }
+
+  /** A note starts on a node: two layers may sound the same pitch on two nodes. */
+  started(midi, node) {
+    if (!this.sounding.has(midi)) this.sounding.set(midi, []);
+    this.sounding.get(midi).push(node);
+  }
+
+  /** The oldest note at that pitch is done. */
+  ended(midi) {
+    const list = this.sounding.get(midi);
+    list?.shift();
+    if (!list?.length) this.sounding.delete(midi);
   }
 
   midiOf(note) {
@@ -341,7 +425,7 @@ class IsonInstrument {
     if (!node) return this;
     // A synth whose last note had a loudness curve starts again at its level.
     if (this.shapedNodes?.has(node)) node.volume.setValueAtTime(this.shapedNodes.get(node), this.Tone.Time(time ?? this.Tone.now()).toSeconds());
-    for (const note of [].concat(notes)) this.sounding.set(this.midiOf(note), node);
+    for (const note of [].concat(notes)) this.started(this.midiOf(note), node);
     const played = this.isMono(node) ? [].concat(notes)[0] : notes;
     node.triggerAttack(played, time, this.velocityOf(velocity), duration, options);
     return this;
@@ -352,7 +436,7 @@ class IsonInstrument {
       const midi = this.midiOf(note);
       const node = this.nodeOf(midi);
       if (node) this.isMono(node) ? node.triggerRelease(time) : node.triggerRelease?.(note, time);
-      this.sounding.delete(midi);
+      this.ended(midi);
     }
     return this;
   }
@@ -381,7 +465,7 @@ class IsonInstrument {
       node.triggerRelease(startTime + (options?.seconds ?? points.at(-1).time));
       shaped = true;
     }
-    if (shaped) this.sounding.delete(midi);
+    if (shaped) this.ended(midi);
     return shaped;
   }
 
@@ -405,6 +489,14 @@ class IsonInstrument {
   }
 
   controllerChange(controller, value, time) {
+    // A control that turns a mode's level: the level follows, 0 to 1.
+    for (const control of Object.values(this.ison.controls ?? {})) {
+      if (control?.cc !== controller || !control.mode) continue;
+      const level = this.levels?.[control.mode];
+      const at = time === undefined ? this.Tone.now() : this.Tone.Time(time).toSeconds();
+      if (level?.gain?.linearRampToValueAtTime) level.gain.linearRampToValueAtTime(value, at + 0.05);
+      else if (level?.gain) level.gain.value = value;
+    }
     for (const node of this.nodes) node.controllerChange?.(controller, value, time);
     return this;
   }
@@ -429,6 +521,7 @@ class IsonInstrument {
     if (this.disposed) return this;
     this.disposed = true;
     for (const node of this.nodes) node.dispose?.();
+    for (const node of this.extra ?? []) node.dispose?.();
     this.output.dispose();
     return this;
   }

@@ -72,7 +72,7 @@ import {
 
 import { createSfzInstrument } from "./sfz.js";
 import { createFaustInstrument, useFaust } from "./faust.js";
-import { createIsonInstrument, ison, isIsonSpec, performIson } from "./ison.js";
+import { createIsonInstrument, hasLayers, ison, isIsonSpec, performIson } from "./ison.js";
 
 import {
   analyseSustain,
@@ -430,7 +430,7 @@ export function performPiece(piece) {
   let changed = false;
   const tracks = piece.tracks.map((track) => {
     const spec = track?.synth;
-    if (!isIsonSpec(spec) || !spec.play) return track;
+    if (!isIsonSpec(spec) || (!spec.play && !hasLayers(spec))) return track;
     changed = true;
     const key = Array.isArray(track.notes) ? "notes" : "events";
     return { ...track, [key]: performIson(spec, track[key] ?? [], { tempo }) };
