@@ -11,7 +11,9 @@
  *   `translationTable`) become a mod-wheel crossfade (CC1, `xfin_locc1` /
  *   `xfout_locc1`);
  * - a group the preset switches on and off (an articulation, a microphone) is
- *   chosen by name with `group`. Without it, the groups on at load play.
+ *   chosen by name with `group`. Without it, the groups on at load play;
+ * - the envelope its knobs give at load (attack, decay, sustain, release of the
+ *   whole instrument) is written into every group that does not set its own.
  */
 
 /** The attributes of one XML tag, as an object. */
@@ -57,6 +59,30 @@ function opcodes(a) {
   return out;
 }
 
+const ENVELOPE = { ENV_ATTACK: "attack", ENV_DECAY: "decay", ENV_SUSTAIN: "sustain", ENV_RELEASE: "release" };
+
+/**
+ * The envelope of the whole instrument at load: what the `<groups>` tag says,
+ * then what the knobs bound to it say at their starting value.
+ *
+ * @param {string} text - the preset, comments removed
+ */
+function instrumentEnvelope(text) {
+  const tag = text.match(/<groups\b[^>]*>/);
+  const envelope = {};
+  const a = tag ? attributes(tag[0]) : {};
+  for (const key of Object.values(ENVELOPE)) if (a[key] !== undefined) envelope[key] = a[key];
+  for (const m of text.matchAll(/<(labeled-knob|knob|slider)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const control = attributes(`<x ${m[2]}>`);
+    for (const b of m[3].matchAll(/<binding\b[^>]*>/g)) {
+      const binding = attributes(b[0]);
+      const key = ENVELOPE[binding.parameter];
+      if (key && binding.level === "instrument" && control.value !== undefined && !binding.translation) envelope[key] = control.value;
+    }
+  }
+  return envelope;
+}
+
 /**
  * The groups of a preset: their attributes, their samples, and the volume
  * table a control applies to each (by group position), if any.
@@ -96,6 +122,7 @@ export function dspresetGroups(xml) {
  */
 export function dspresetToSfz(xml, { group } = {}) {
   const groups = dspresetGroups(xml);
+  const envelope = instrumentEnvelope(xml.replace(/<!--[\s\S]*?-->/g, ""));
   const chosen = group
     ? groups.filter((g) => g.attributes.name === group)
     : groups.filter((g) => g.attributes.enabled !== "false");
@@ -103,7 +130,7 @@ export function dspresetToSfz(xml, { group } = {}) {
   const crossfaded = !group && chosen.some((g) => g.table);
   const lines = [];
   for (const g of chosen) {
-    const a = g.attributes;
+    const a = { ...envelope, ...g.attributes };
     const head = opcodes(a);
     if (a.seqMode === "round_robin" && a.seqLength) head.push(`seq_length=${a.seqLength}`);
     if (crossfaded && g.table) head.push(crossfade(g.table));

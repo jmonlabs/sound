@@ -14,7 +14,10 @@ const preset = `<?xml version="1.0"?>
   <ui><tab><labeled-knob>
     <binding type="amp" level="group" position="0" parameter="AMP_VOLUME" translation="table" translationTable="0,1;0.1,1;0.4,0;1,0" />
     <binding type="amp" level="group" position="1" parameter="AMP_VOLUME" translation="table" translationTable="0,0;0.2,1;1,1" />
-  </labeled-knob></tab></ui>
+  </labeled-knob>
+  <labeled-knob label="attack" value="1.2"><binding type="amp" level="instrument" position="2" parameter="ENV_ATTACK" /></labeled-knob>
+  <labeled-knob label="release" value="1.75"><binding type="amp" level="instrument" position="2" parameter="ENV_RELEASE" /></labeled-knob>
+  </tab></ui>
   <groups>
     <group name="Soft" volume="6dB" ampVelTrack="0">
       <sample path="Samples/soft C3.wav" rootNote="48" loNote="40" hiNote="52" start="100" end="9000" loopEnabled="true" loopStart="200" loopEnd="9000" pan="-18" />
@@ -44,7 +47,10 @@ test("a preset's groups on at load, crossfaded at the mod wheel as its knob did"
   assert.equal(soft.xfout_hicc1, 51, "…to 0.4 of the wheel");
   assert.equal(a.xfin_locc1, 0);
   assert.equal(a.xfin_hicc1, 25, "Loud fades in up to 0.2");
-  assert.equal(a.ampeg_attack, 0.5);
+  assert.equal(soft.ampeg_attack, 1.2, "the attack knob at load, for a group that says nothing");
+  assert.equal(soft.ampeg_release, 1.75);
+  assert.equal(a.ampeg_attack, 0.5, "a group's own attack wins");
+  assert.equal(a.ampeg_release, 2);
   assert.deepEqual([a.lorand, a.hirand, b.lorand, b.hirand], [0, 0.5, 0.5, 1], "random takes share the dice");
 });
 
