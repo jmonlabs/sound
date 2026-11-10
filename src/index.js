@@ -73,6 +73,7 @@ import {
 import { createSfzInstrument } from "./sfz.js";
 import { createFaustInstrument, useFaust } from "./faust.js";
 import { createIsonInstrument, hasLayers, ison, isIsonSpec, performIson } from "./ison.js";
+export { dspresetToSfz, dspresetGroups } from "./dspreset.js";
 
 import {
   analyseSustain,
@@ -127,10 +128,12 @@ export function readSpec(spec) {
     // An ison: an instrument said in JSON (see ison.js).
     if (isIsonSpec(spec)) return { kind: "ison", ison: spec };
 
-    if (typeof spec.sfz === "string") {
+    // A Decent Sampler preset is played as SFZ, read on the way (see dspreset.js).
+    if (typeof spec.sfz === "string" || typeof spec.dspreset === "string") {
       return {
         kind: "sfz",
-        sfz: spec.sfz,
+        sfz: spec.sfz ?? spec.dspreset,
+        ...(spec.group !== undefined ? { group: spec.group } : {}),
         staccato: spec.staccato,
         staccatoUnder: spec.staccatoUnder,
         envelope: spec.envelope,

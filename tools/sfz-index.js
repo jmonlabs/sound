@@ -1,8 +1,8 @@
-// La liste des instruments SFZ d'un dossier, pour les explorer dans un carnet (le navigateur ne peut pas lister un dossier).
+// La liste des instruments SFZ et Decent Sampler (.dspreset) d'un dossier, pour les explorer dans un carnet (le navigateur ne peut pas lister un dossier).
 //
 //   node tools/sfz-index.js /Volumes/instruments/jmon/sfz
 //
-// Écrit `index.json` dans ce dossier : [{ library, path, name }], `path` relatif au dossier, `library` le premier dossier du chemin.
+// Écrit `index.json` dans ce dossier : [{ library, path, name, format }], `path` relatif au dossier, `library` le premier dossier du chemin, `format` "sfz" ou "dspreset" (la clé à écrire dans `synth`).
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 
@@ -14,14 +14,15 @@ const walk = (dir) => {
     if (entry.startsWith(".") || entry === "__MACOSX") continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full);
-    else if (entry.toLowerCase().endsWith(".sfz")) found.push(full);
+    else if (/\.(sfz|dspreset)$/i.test(entry)) found.push(full);
   }
 };
 walk(root);
 const index = found.sort().map((full) => {
   const path = relative(root, full);
   const parts = path.split("/");
-  return { library: parts[0] === "pianobook" ? `pianobook/${parts[1]}` : parts[0], path, name: basename(full, ".sfz") };
+  const format = /\.dspreset$/i.test(full) ? "dspreset" : "sfz";
+  return { library: parts[0] === "pianobook" ? `pianobook/${parts[1]}` : parts[0], path, name: basename(full).replace(/\.(sfz|dspreset)$/i, ""), format };
 });
 writeFileSync(join(root, "index.json"), JSON.stringify(index, null, 1));
 console.log(`${index.length} instruments, ${new Set(index.map((i) => i.library)).size} bibliothèques → ${join(root, "index.json")}`);

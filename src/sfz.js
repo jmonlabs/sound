@@ -25,6 +25,7 @@
  */
 
 import { parseSfz, readWav, sfzIncludes } from "./sfz-parse.js";
+import { dspresetToSfz } from "./dspreset.js";
 
 /** Each recording, by URL, read once for every context: see `recording`. */
 const recordings = new Map();
@@ -46,13 +47,16 @@ const LOOP_CROSSFADE = 0.02;
 const RELEASE_FLOOR = 0.001;
 
 /**
- * Fetch an SFZ file and every file it includes.
+ * Fetch an SFZ file and every file it includes. A Decent Sampler preset
+ * (`.dspreset`) is read as SFZ on the way (see dspreset.js), its groups on at
+ * load, or the one named `group`.
  *
  * @param {string} url
+ * @param {{group?: string}} [options]
  * @returns {Promise<{url: string, control: Object, regions: Array<Object>}>}
  *   each region's `sample` resolved to a URL
  */
-export async function loadSfzFile(url) {
+export async function loadSfzFile(url, { group } = {}) {
   const absolute = new URL(url, globalThis.location?.href ?? "file:///").href;
   const texts = {};
   const fetchText = async (fileUrl) => {
@@ -60,7 +64,8 @@ export async function loadSfzFile(url) {
     if (!response.ok) throw new Error(`Could not load the SFZ file ${fileUrl} (${response.status})`);
     return response.text();
   };
-  const main = await fetchText(absolute);
+  const isPreset = /\.dspreset$/i.test(new URL(absolute).pathname);
+  const main = isPreset ? dspresetToSfz(await fetchText(absolute), { group }) : await fetchText(absolute);
   const pending = sfzIncludes(main);
   while (pending.length) {
     const path = pending.shift();
@@ -435,7 +440,7 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
+  constructor(Tone, { sfz, group, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -454,7 +459,7 @@ class SfzInstrument {
     // The piece's controller moves, as they arrive: number → [{ time, value 0..127 }].
     this.moves = new Map();
 
-    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url) : null)))
+    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group }) : null)))
       .then(async (files) => {
         // Given the track's notes, only the regions they can play are kept, and only their recordings load.
         const [sustain, short] = files.map((file) => (file && notes ? { ...file, regions: regionsForNotes(file.regions, notes) } : file));
