@@ -429,26 +429,37 @@ class IsonInstrument {
   }
 
   /**
-   * The controls that follow the velocity (`"velocity": true`): each note
-   * turns them to its velocity as it starts, the way a player's hand sets the
-   * mod wheel for the next note. For a source whose force is a controller,
-   * not the velocity (a Decent Sampler preset's sustained notes).
+   * The controls that follow the velocity (`"velocity": true`), as each note's
+   * own: `{ cc: velocity }`. The note carries them to its source, so two notes
+   * sounding together (a double stop, a doubling) each keep their own force.
+   * A source that cannot take a note's own controllers (a SoundFont engine
+   * has one mod wheel per channel) gets a controller move instead.
    */
   velocityControls(node, velocity, time) {
+    const own = {};
     for (const control of Object.values(this.ison.controls ?? {})) {
-      if (control?.velocity === true && typeof control.cc === "number") node.controllerChange?.(control.cc, Math.max(0, Math.min(1, velocity)), time ?? this.Tone.now());
+      if (control?.velocity === true && typeof control.cc === "number") own[control.cc] = Math.max(0, Math.min(1, velocity));
     }
+    if (Object.keys(own).length === 0) return null;
+    if (node?.isSfz) return own;
+    for (const [cc, value] of Object.entries(own)) node.controllerChange?.(Number(cc), value, time ?? this.Tone.now());
+    return null;
+  }
+
+  /** The options a note goes to its source with: its own controllers added, if any. */
+  withOwn(options, own) {
+    return own ? { ...options, controllers: { ...(options?.controllers ?? {}), ...own } } : options;
   }
 
   triggerAttack(notes, time, velocity = 1, duration, options) {
     const node = this.nodeFor(options?.variant);
     if (!node) return this;
-    this.velocityControls(node, velocity, time);
+    const own = this.velocityControls(node, velocity, time);
     // A synth whose last note had a loudness curve starts again at its level.
     if (this.shapedNodes?.has(node)) node.volume.setValueAtTime(this.shapedNodes.get(node), this.Tone.Time(time ?? this.Tone.now()).toSeconds());
     for (const note of [].concat(notes)) this.started(this.midiOf(note), node);
     const played = this.isMono(node) ? [].concat(notes)[0] : notes;
-    node.triggerAttack(played, time, this.velocityOf(velocity), duration, options);
+    node.triggerAttack(played, time, this.velocityOf(velocity), duration, this.withOwn(options, own));
     return this;
   }
 
@@ -464,8 +475,8 @@ class IsonInstrument {
 
   triggerAttackRelease(notes, duration, time, velocity = 1, options) {
     const node = this.nodeFor(options?.variant);
-    if (node) this.velocityControls(node, velocity, time);
-    node?.triggerAttackRelease(notes, duration, time, this.velocityOf(velocity), options);
+    const own = node ? this.velocityControls(node, velocity, time) : null;
+    node?.triggerAttackRelease(notes, duration, time, this.velocityOf(velocity), this.withOwn(options, own));
     return this;
   }
 

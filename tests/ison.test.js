@@ -280,3 +280,25 @@ test("a control the piece writes on a track is the piece's: the velocity stops t
   assert.equal(other.tracks?.[0].synth.controls.dynamics.velocity ?? true, true, "another track's lane changes nothing here");
   assert.equal(bowed.controls.dynamics.velocity, true, "the instrument itself is untouched");
 });
+
+test("two notes together keep their own force: a sampler gets each note's velocity control with the note, not as a shared move", () => {
+  const Tone = fakeTone();
+  Tone.now = () => 0;
+  class Sampled extends Tone.FMSynth {
+    constructor(o) { super(o); this.isSfz = true; this.attacks = []; }
+    triggerAttack(note, time, velocity, duration, options) { this.attacks.push([note, options?.controllers]); return this; }
+    controllerChange(cc, value) { (this.moves ??= []).push([cc, value]); }
+  }
+  Tone.Sampled = Sampled;
+  const bowed = {
+    format: "ison", version: "1.0", name: "Bowed",
+    sources: { synth: { type: "Sampled" } },
+    modes: { sustain: { source: "synth" } },
+    controls: { dynamics: { cc: 1, default: 0.7, velocity: true } },
+  };
+  const { node } = sound.create(bowed, Tone, { notes: [] });
+  node.triggerAttack([74], 0, 1, 2);
+  node.triggerAttack([81], 0, 0.55, 2);
+  assert.deepEqual(node.nodes[0].attacks.map(([, c]) => c), [{ 1: 1 }, { 1: 0.55 }], "each note its own CC1");
+  assert.equal(node.nodes[0].moves, undefined, "no shared move that would pull the other note along");
+});

@@ -567,9 +567,17 @@ class SfzInstrument {
    * @param {number} [seconds] - how long the notes will last, when known:
    *   a short one plays the staccato file, if it has that key
    */
-  triggerAttack(notes, time, velocity = 1, seconds = Infinity) {
+  /**
+   * @param {Object} [options]
+   * @param {Object} [options.controllers] - controller number → 0..1, for
+   *   this note alone: its own position of a controller (an ison control that
+   *   follows the velocity), which the instrument's other notes do not share
+   */
+  triggerAttack(notes, time, velocity = 1, seconds = Infinity, options = {}) {
     if (!this.files) return this;
     const at = this.timeOf(time);
+    const own = {};
+    for (const [number, value] of Object.entries(options?.controllers ?? {})) own[number] = Math.max(0, Math.min(1, value)) * 127;
     const short = this.files.staccato && seconds < this.staccatoUnder;
     const vel = Math.max(1, Math.min(127, Math.round(velocity * 127)));
     for (const note of [].concat(notes)) {
@@ -577,7 +585,7 @@ class SfzInstrument {
       const key = Math.round(exact);
       const round = this.rounds.get(key) ?? 0;
       this.rounds.set(key, round + 1);
-      const attack = { key, velocity: vel, trigger: "attack", round, cents: (exact - key) * 100 };
+      const attack = { key, velocity: vel, trigger: "attack", round, cents: (exact - key) * 100, own };
       const played = short ? this.startNote(this.files.staccato, attack, at) : 0;
       if (played === 0) this.startNote(this.files.sustain, attack, at);
     }
@@ -633,20 +641,20 @@ class SfzInstrument {
       for (const move of this.moves.get(number) ?? []) if (move.time >= from && move.time <= to) times.add(move.time);
     }
     for (const time of [...times].sort((a, b) => a - b)) {
-      const control = controlPlan(voice.region, this.controllersAt(voice.file, time));
+      const control = controlPlan(voice.region, { ...this.controllersAt(voice.file, time), ...(voice.own ?? {}) });
       voice.control.gain.linearRampToValueAtTime(control.gain, time);
       voice.cutoff?.linearRampToValueAtTime(control.cutoffCents, time);
       for (const { band, node } of voice.eqs) node.gain.linearRampToValueAtTime(control.eqGains[band - 1], time);
     }
   }
 
-  startRegions(file, { key, velocity, trigger, round, cents = 0 }, at) {
+  startRegions(file, { key, velocity, trigger, round, cents = 0, own = {} }, at) {
     const random = this.random();
     // Legato: a note still sounds, or lets go just as this one starts, the
     // way a slurred line is written.
     const legato = trigger === "attack"
       && this.voices.some((v) => v.trigger !== "release" && v.start < at && v.releasedAt >= at);
-    const controllers = this.controllersAt(file, at);
+    const controllers = { ...this.controllersAt(file, at), ...own };
     const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch, controllers, previous: this.previousKey ?? null };
     if (trigger === "attack") this.previousKey = key;
     const started = [];
@@ -664,7 +672,9 @@ class SfzInstrument {
       });
       plan.cents += cents;
       this.chokeGroup(plan.group, at);
-      started.push(this.startVoice(plan, key, velocity, at, file, region, controllers));
+      const voice = this.startVoice(plan, key, velocity, at, file, region, controllers);
+      voice.own = own;
+      started.push(voice);
     }
     return started;
   }
@@ -850,10 +860,10 @@ class SfzInstrument {
     }
   }
 
-  triggerAttackRelease(notes, duration, time, velocity = 1) {
+  triggerAttackRelease(notes, duration, time, velocity = 1, options = {}) {
     const at = this.timeOf(time);
     const seconds = this.timeOf(duration);
-    this.triggerAttack(notes, at, velocity, seconds);
+    this.triggerAttack(notes, at, velocity, seconds, options);
     this.triggerRelease(notes, at + seconds);
     return this;
   }
