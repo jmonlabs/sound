@@ -72,6 +72,10 @@ export function medianPitch(x, expected) {
 export function vibratoOf(x, expected) {
   const length = x.length / RATE;
   if (length < 1.2) return null;
+  // Only a held sound: a plucked or struck one that dies away wavers as it fades (strings beating), which is not a vibrato.
+  const level = (t0, t1) => { let e = 0; const a = Math.floor(t0 * RATE), b = Math.min(x.length, Math.floor(t1 * RATE)); for (let i = a; i < b; i++) e += x[i] * x[i]; return e / Math.max(1, b - a); };
+  const end = Math.min(length, 4.3);
+  if (10 * Math.log10(level(0.3, 0.8) / (level(end - 0.5, end) || 1e-12)) > 12) return null;
   const track = pitchTrack(x, expected, { from: 0.3, to: Math.min(length, 4.3), step: 0.01 });
   if (track.length < 50 || median(track.map((p) => p.clarity)) < 0.8) return null;
   const cents = track.map((p) => p.cents);

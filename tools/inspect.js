@@ -97,7 +97,8 @@ export function inspect(file) {
     try { x = decode(path); } catch { continue; }
     const expected = 440 * 2 ** (((r.pitch_keycenter ?? 60) - 69 + (r.tune ?? 0) / 100) / 12);
     const pitch = medianPitch(x, expected);
-    if (pitch && pitch.clarity >= 0.8) sound.tuning.push(Math.round(pitch.cents));
+    // More than 50 cents from its note is a noise, a chord or a bad measurement, not a tuning.
+    if (pitch && pitch.clarity >= 0.8 && Math.abs(pitch.cents) <= 50) sound.tuning.push(Math.round(pitch.cents));
     const vibrato = vibratoOf(x, expected);
     if (vibrato) sound.vibrato.push(vibrato);
     const speech = speechOf(x);
