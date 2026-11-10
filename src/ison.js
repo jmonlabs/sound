@@ -315,7 +315,14 @@ class IsonInstrument {
   buildOne(source, mode, { create, notes }) {
     const ison = this.ison;
     if (typeof source.sfz === "string" || typeof source.dspreset === "string") {
-      const spec = { ...source, envelope: ison.envelope ?? source.envelope, start: mode.start ?? source.start, controls: { ...(source.controls ?? {}), ...(mode.controls ?? {}) } };
+      const spec = {
+        ...source,
+        envelope: ison.envelope ?? source.envelope,
+        start: mode.start ?? source.start,
+        controls: { ...(source.controls ?? {}), ...(mode.controls ?? {}) },
+        // The instrument's controls start where it says (`default`), as for a SoundFont.
+        controllers: { ...(source.controllers ?? {}), ...controllerDefaults(ison) },
+      };
       if (mode.group !== undefined) spec.group = mode.group; // a group of a Decent Sampler preset
       if (mode.keyswitch !== undefined) spec.keyswitch = mode.keyswitch;
       return create?.(spec, this.Tone, { notes })?.node ?? null;

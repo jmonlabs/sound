@@ -250,9 +250,11 @@ function byControllers(region, names, controllers) {
     if (!match || !names.includes(match[1]) || typeof amount !== "number") continue;
     const position = (controllers[match[2]] ?? 0) / 127;
     // Curve 1 is bipolar: the middle of the controller is no change, so a
-    // tuning knob at rest (64) leaves the pitch alone.
-    const bipolar = region[`${match[1]}_curvecc${match[2]}`] === 1;
-    total += amount * (bipolar ? position * 2 - 1 : position);
+    // tuning knob at rest (64) leaves the pitch alone. A curve of the file's
+    // own (`<curve>`, 128 points) gives the share at each controller value.
+    const curve = region[`${match[1]}_curvecc${match[2]}`];
+    const shaped = Array.isArray(curve) ? curve[Math.max(0, Math.min(127, Math.round(position * 127)))] : null;
+    total += amount * (shaped ?? (curve === 1 ? position * 2 - 1 : position));
   }
   return total;
 }
@@ -279,7 +281,24 @@ export function controlPlan(region, controllers) {
       region[`xfout_locc${n}`], region[`xfout_hicc${n}`], region.xf_cccurve);
   }
   const decibels = byControllers(region, ["gain", "volume"], controllers);
-  return { gain: share * 10 ** (decibels / 20), cutoffCents: byControllers(region, ["cutoff"], controllers) };
+  // `amplitude_ccN` adds to the amplitude (percent) as the controller turns:
+  // a level that follows a knob without reaching silence.
+  const amplitude = hasAmplitudeControl(region) ? Math.max(0, (region.amplitude ?? 100) + byControllers(region, ["amplitude"], controllers)) / 100 : 1;
+  return {
+    gain: share * amplitude * 10 ** (decibels / 20),
+    cutoffCents: byControllers(region, ["cutoff"], controllers),
+    eqGains: [1, 2, 3].map((band) => (region[`eq${band}_gain`] ?? 0) + byControllers(region, [`eq${band}_gain`], controllers)),
+  };
+}
+
+/** Whether a controller moves the region's amplitude (then controlPlan applies it, not voicePlan). */
+function hasAmplitudeControl(region) {
+  return Object.keys(region).some((opcode) => /^amplitude_(?:on)?cc\d+$/.test(opcode));
+}
+
+/** Whether a controller moves this EQ band's gain. */
+function eqMoves(region, band) {
+  return Object.keys(region).some((opcode) => new RegExp(`^eq${band}_gain_(?:on)?cc\\d+$`).test(opcode));
 }
 
 /**
@@ -313,7 +332,7 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
   // The controllers' part of the gain is the voice's control gain (see
   // controlPlan), which follows them while the note sounds.
   const decibels = (region.volume ?? 0) + (region.gain ?? 0) + volume + velocityDb + spread("amp_random");
-  const amplitude = (region.amplitude ?? 100) / 100;
+  const amplitude = hasAmplitudeControl(region) ? 1 : (region.amplitude ?? 100) / 100;
 
   const seconds = (value) => Math.max(0, value);
   return {
@@ -350,11 +369,14 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
     filter: filterPlan(region, key, velocity),
     eq: [1, 2, 3]
       .map((band) => ({
+        band,
         frequency: region[`eq${band}_freq`] ?? [50, 500, 5000][band - 1],
         octaves: region[`eq${band}_bw`] ?? 1,
-        gain: region[`eq${band}_gain`] ?? 0,
+        gain: (region[`eq${band}_gain`] ?? 0) + byControllers(region, [`eq${band}_gain`], controllers),
+        moves: eqMoves(region, band),
       }))
-      .filter((band) => band.gain !== 0),
+      .filter((band) => band.gain !== 0 || band.moves),
+    loopCrossfade: region.loop_crossfade ?? null,
   };
 }
 
@@ -399,7 +421,7 @@ function centsRatio(cents) {
 function controlledBy(region) {
   const numbers = new Set();
   for (const opcode of Object.keys(region)) {
-    const match = /^(?:gain|volume|cutoff)_(?:on)?cc(\d+)$/.exec(opcode) ?? /^xf(?:in|out)_(?:lo|hi)cc(\d+)$/.exec(opcode);
+    const match = /^(?:gain|volume|cutoff|amplitude|eq\d_gain)_(?:on)?cc(\d+)$/.exec(opcode) ?? /^xf(?:in|out)_(?:lo|hi)cc(\d+)$/.exec(opcode);
     if (match) numbers.add(match[1]);
   }
   return numbers;
@@ -610,6 +632,7 @@ class SfzInstrument {
       const control = controlPlan(voice.region, this.controllersAt(voice.file, time));
       voice.control.gain.linearRampToValueAtTime(control.gain, time);
       voice.cutoff?.linearRampToValueAtTime(control.cutoffCents, time);
+      for (const { band, node } of voice.eqs) node.gain.linearRampToValueAtTime(control.eqGains[band - 1], time);
     }
   }
 
@@ -654,9 +677,20 @@ class SfzInstrument {
 
   startVoice(plan, key, velocity, at, file, region, controllers) {
     const ctx = this.context;
-    const buffer = this.buffers.get(plan.sample);
+    let buffer = this.buffers.get(plan.sample);
     const fileLoop = this.recordings.get(plan.sample).loop;
     const frameRate = buffer.sampleRate;
+
+    const loopMode = plan.loopMode ?? (fileLoop || plan.loopStart !== null ? "loop_continuous" : "no_loop");
+    const loopStart = plan.loopStart ?? fileLoop?.start;
+    const loopEnd = plan.loopEnd ?? fileLoop?.end;
+    const loops = (loopMode === "loop_continuous" || loopMode === "loop_sustain")
+      && loopStart !== undefined && loopEnd !== undefined && loopEnd > loopStart;
+    // The file's own crossfade (`loop_crossfade`), on a copy of the recording
+    // made once for this loop.
+    if (loops && plan.loopCrossfade > 0 && plan.loopStart !== null) {
+      buffer = this.crossfadedBuffer(plan.sample, buffer, loopStart, loopEnd, plan.loopCrossfade);
+    }
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -664,15 +698,10 @@ class SfzInstrument {
     // all move the playback rate.
     const rate = plan.rate * centsRatio(plan.cents);
     source.playbackRate.value = rate;
-    const loopMode = plan.loopMode ?? (fileLoop || plan.loopStart !== null ? "loop_continuous" : "no_loop");
-    if (loopMode === "loop_continuous" || loopMode === "loop_sustain") {
-      const start = plan.loopStart ?? fileLoop?.start;
-      const end = plan.loopEnd ?? fileLoop?.end;
-      if (start !== undefined && end !== undefined && end > start) {
-        source.loop = true;
-        source.loopStart = start / frameRate;
-        source.loopEnd = (end + 1) / frameRate;
-      }
+    if (loops) {
+      source.loop = true;
+      source.loopStart = loopStart / frameRate;
+      source.loopEnd = (loopEnd + 1) / frameRate;
     }
 
     // source → filter → EQ → envelope → shape → controllers → pan → the track
@@ -688,8 +717,10 @@ class SfzInstrument {
       cutoff = filter.detune;
       chain.push(filter);
     }
+    const eqs = [];
     for (const band of plan.eq) {
       const eq = ctx.createBiquadFilter();
+      if (band.moves) eqs.push({ band: band.band, node: eq });
       eq.type = "peaking";
       eq.frequency.value = band.frequency;
       eq.Q.value = 1 / (2 * Math.sinh((Math.LN2 / 2) * band.octaves));
@@ -739,11 +770,12 @@ class SfzInstrument {
     source.start(start, Math.min(plan.offset / frameRate + this.start, buffer.duration));
     const voice = {
       key, velocity, start, plan, file, region, source, rate, level, shape: shapeGain.gain, vibrato,
-      control: controlGain, cutoff, controlledBy: controlledBy(region),
+      control: controlGain, cutoff, eqs, controlledBy: controlledBy(region),
       nodes: chain, oneShot: loopMode === "one_shot", releasedAt: Infinity, endsAt: Infinity,
     };
     controlGain.gain.setValueAtTime(control.gain, start);
     if (cutoff) cutoff.setValueAtTime(control.cutoffCents, start);
+    for (const { band, node } of eqs) node.gain.setValueAtTime(control.eqGains[band - 1], start);
     source.onended = () => {
       for (const node of chain) node.disconnect();
       vibrato?.oscillator.stop();
@@ -752,6 +784,24 @@ class SfzInstrument {
     };
     this.voices.push(voice);
     return voice;
+  }
+
+  /** A recording with the end of a loop blended into what precedes its start, made once per loop. */
+  crossfadedBuffer(sample, buffer, start, end, seconds) {
+    this.crossfaded ??= new Map();
+    const key = `${sample}|${start}|${end}|${seconds}`;
+    if (!this.crossfaded.has(key)) {
+      const copy = this.context.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+      const channels = [];
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const samples = new Float32Array(buffer.getChannelData(c));
+        channels.push(samples);
+      }
+      crossfadeLoop({ channels, sampleRate: buffer.sampleRate, loop: { start, end } }, seconds);
+      channels.forEach((samples, c) => copy.copyToChannel(samples, c));
+      this.crossfaded.set(key, copy);
+    }
+    return this.crossfaded.get(key);
   }
 
   /**

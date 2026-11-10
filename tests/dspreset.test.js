@@ -11,6 +11,7 @@ import { readSpec } from "../src/index.js";
 
 const preset = `<?xml version="1.0"?>
 <DecentSampler>
+  <midi><cc number="1"><binding level="ui" type="control" parameter="VALUE" position="0" /></cc></midi>
   <ui><tab><labeled-knob>
     <binding type="amp" level="group" position="0" parameter="AMP_VOLUME" translation="table" translationTable="0,1;0.1,1;0.4,0;1,0" />
     <binding type="amp" level="group" position="1" parameter="AMP_VOLUME" translation="table" translationTable="0,0;0.2,1;1,1" />
@@ -65,4 +66,55 @@ test("a track's synth may name a preset, and a group of it", () => {
   assert.equal(spec.kind, "sfz");
   assert.equal(spec.sfz, "/lib/Strings.dspreset");
   assert.equal(spec.group, "Warp");
+});
+
+// A preset in the manner of Zauberstrings: one recorded force, the others
+// made by the mod wheel (a level on the recordings' tag, a peak filter on the
+// group, a shorter attack), an expression knob on CC11, a loop crossfade.
+const modelled = `<?xml version="1.0"?>
+<DecentSampler>
+  <midi>
+    <cc number="1"><binding level="ui" type="control" parameter="VALUE" position="0" /></cc>
+    <cc number="11"><binding level="ui" type="control" parameter="VALUE" position="1" /></cc>
+  </midi>
+  <groups volume="1" ampVelTrack="0">
+    <group name="Sustain" enabled="false">
+      <effects><effect type="peak" frequency="4000.0" q="0.5" gain="1.0" /></effects>
+      <sample path="Files/D4-Long1.flac" tags="sustain,L1" rootNote="62" loNote="62" hiNote="63" loopEnabled="true" loopStart="44100" loopEnd="220500" loopCrossfade="12000" volume="1.0" />
+    </group>
+  </groups>
+  <ui><tab>
+    <labeled-knob label="Dynamic" minValue="0" maxValue="1" value="1">
+      <binding type="amp" level="tag" identifier="L1" parameter="AMP_VOLUME" translation="table" translationTable="0,0.251; 1,1.0" />
+      <binding type="effect" level="group" groupIndex="0" effectIndex="0" parameter="FX_GAIN" translation="linear" translationOutputMin="0.016" translationOutputMax="1.0" />
+      <binding type="amp" level="group" groupIndex="0" parameter="ENV_ATTACK" modBehavior="add" translation="linear" translationOutputMin="0.1" translationOutputMax="0.0" />
+    </labeled-knob>
+    <labeled-knob label="Expression" minValue="0" maxValue="1" value="1">
+      <binding level="group" position="0" type="amp" parameter="AMP_VOLUME" translation="linear" translationOutputMin="0.0" translationOutputMax="1.0" />
+    </labeled-knob>
+    <labeled-knob label="Attack" minValue="0" maxValue="2.5" value="0"><binding level="group" position="0" parameter="ENV_ATTACK" type="amp" /></labeled-knob>
+    <labeled-knob label="Release" minValue="0" maxValue="2.5" value="0.65"><binding level="group" position="0" parameter="ENV_RELEASE" type="amp" /></labeled-knob>
+  </tab></ui>
+</DecentSampler>`;
+
+test("a preset whose forces are made by the mod wheel: level, filter and attack follow CC1", () => {
+  const { control, regions } = parseSfz(dspresetToSfz(modelled));
+  assert.equal(regions.length, 1, "a preset with no group on at load plays all of them");
+  const [r] = regions;
+  assert.equal(control.set_cc1, 127, "the controllers start where the knobs do");
+  assert.equal(control.set_cc11, 127);
+  assert.equal(r.volume, undefined, "a bare volume is a factor: 1.0 is 0 dB");
+  assert.equal(r.amp_veltrack, 0, "what <groups> says, every group inherits");
+  assert.deepEqual([r.amplitude, r.amplitude_oncc1], [25.1, 74.9], "the tag's level, from a quarter to full");
+  assert.equal(r.ampeg_attack, 0.1, "the attack knob (0) plus the wheel's lowest addition");
+  assert.equal(r.ampeg_attack_oncc1, -0.1, "the wheel up, no attack at all");
+  assert.equal(r.ampeg_release, 0.65);
+  assert.deepEqual([r.xfin_locc11, r.xfin_hicc11], [0, 127], "expression on CC11");
+  assert.equal(r.eq1_freq, 4000);
+  assert.equal(r.eq1_bw, 2.543, "q 0.5, in octaves");
+  assert.equal(r.eq1_gain, -35.918, "the filter's lowest gain (0.016), in dB");
+  assert.equal(r.eq1_gain_oncc1, 35.918);
+  assert.ok(Array.isArray(r.eq1_gain_curvecc1) && r.eq1_gain_curvecc1.length === 128, "on a curve: the preset turns a factor, not decibels");
+  assert.ok(r.eq1_gain_curvecc1[64] > 0.8, "half way up the wheel, the filter has given back most of its cut");
+  assert.equal(r.loop_crossfade, 0.272, "12000 frames at 44.1 kHz");
 });

@@ -11,6 +11,7 @@
  *     <master>   for the groups after it
  *     <group>    for the regions after it
  *     <region>   one recording
+ *     <curve>    a shape a controller follows (curve_index, v000…v127)
  *
  * This file only reads: parseSfz turns the text into a flat list of regions,
  * each with every opcode it inherits, and nothing here touches audio.
@@ -105,6 +106,7 @@ export function parseSfz(text, { include } = {}) {
   let region = null;
   let current = null;
   const regions = [];
+  const curves = [];
 
   const closeRegion = () => {
     if (region) regions.push(region);
@@ -120,7 +122,8 @@ export function parseSfz(text, { include } = {}) {
         case "master": master = {}; group = {}; current = master; break;
         case "group": group = {}; current = group; break;
         case "region": region = { ...global, ...master, ...group }; current = region; break;
-        default: current = null; // <curve>, <effect>, <midi>: not read
+        case "curve": current = {}; curves.push(current); break;
+        default: current = null; // <effect>, <midi>: not read
       }
       continue;
     }
@@ -128,6 +131,17 @@ export function parseSfz(text, { include } = {}) {
     current[token.opcode] = readValue(token.opcode, token.value);
   }
   closeRegion();
+
+  // A curve (`<curve> curve_index=7 v000=0 … v127=1`) is the shape a
+  // controller's opcode follows (`eq1_gain_curvecc1=7`): the region carries
+  // the 128 points instead of the number.
+  const shapes = {};
+  for (const c of curves) if (typeof c.curve_index === "number") shapes[c.curve_index] = curvePoints(c);
+  for (const r of regions) {
+    for (const [opcode, value] of Object.entries(r)) {
+      if (/_curvecc\d+$/.test(opcode) && shapes[value]) r[opcode] = shapes[value];
+    }
+  }
 
   for (const r of regions) {
     // `key` is shorthand for a single key, tuned to itself.
@@ -141,6 +155,28 @@ export function parseSfz(text, { include } = {}) {
     }
   }
   return { control, regions };
+}
+
+/** A curve's 128 values, the ones it does not give drawn as straight lines between those it does. */
+function curvePoints(curve) {
+  const given = [];
+  for (const [opcode, value] of Object.entries(curve)) {
+    const m = /^v(\d+)$/.exec(opcode);
+    if (m && typeof value === "number") given.push([Number(m[1]), value]);
+  }
+  given.sort((a, b) => a[0] - b[0]);
+  if (!given.length) return null;
+  const points = [];
+  for (let x = 0; x < 128; x++) {
+    const after = given.findIndex(([at]) => at >= x);
+    if (after === -1) points.push(given[given.length - 1][1]);
+    else if (after === 0 || given[after][0] === x) points.push(given[after][1]);
+    else {
+      const [x0, y0] = given[after - 1], [x1, y1] = given[after];
+      points.push(y0 + (y1 - y0) * (x - x0) / (x1 - x0));
+    }
+  }
+  return points;
 }
 
 /** Apply `#define` and `#include`, recursively. */

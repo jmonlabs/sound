@@ -368,3 +368,18 @@ test("a sounding note follows the mod wheel, whether the moves come before the n
   node.controllerChange(1, 0, 9); // after the note: not its business
   assert.deepEqual(ramps(context).filter(([, t]) => t >= 2), [[20, 2], [20, 2], [10, 3]]);
 });
+
+test("a level and a peak filter follow the mod wheel, the filter on the file's own curve", () => {
+  const { regions } = parseSfz(`<curve> curve_index=7 v000=0 v064=0.9 v127=1
+<region> sample=a.flac amplitude=25 amplitude_oncc1=75 eq1_freq=4000 eq1_bw=2.5 eq1_gain=-36 eq1_gain_oncc1=36 eq1_gain_curvecc1=7`);
+  const [r] = regions;
+  const down = controlPlan(r, { 1: 0 }), half = controlPlan(r, { 1: 64 }), up = controlPlan(r, { 1: 127 });
+  assert.equal(down.gain, 0.25, "the wheel down: a quarter of the level");
+  assert.equal(up.gain, 1);
+  assert.equal(down.eqGains[0], -36);
+  assert.ok(Math.abs(half.eqGains[0] - (-36 + 36 * 0.9)) < 1e-9, "half way: where the curve says, not half the decibels");
+  assert.equal(up.eqGains[0], 0);
+  const plan = voicePlan(r, { key: 60, velocity: 100, weight: 1, controllers: { 1: 0 }, random: () => 0.5 });
+  assert.equal(plan.gain, 10 ** (40 * Math.log10(100 / 127) / 20), "the level the wheel gives is the control gain's, not counted twice");
+  assert.ok(plan.eq[0].moves, "a band the wheel moves is kept even at 0 dB");
+});
