@@ -276,6 +276,7 @@ const strings = "/samples/sfz/virtual-playing-orchestra-3/Strings";
   staccato: `${strings}/cello-SOLO-staccato.sfz`, // notes shorter than staccatoUnder
   staccatoUnder: 0.3,                             // seconds, the default
   envelope: { attack: 0.2, release: 1 },          // over the file's own, optional
+  tuning: "/instruments/cello.tuning.json",       // cents per recording, optional (tools/tuning.js)
   volume: -15,                                    // dB
 } }
 ```
@@ -317,6 +318,42 @@ their own sample rate and the loop in their `smpl` chunk: Firefox's resampling
 at decode smears a file's last frames, and a loop ending there clicks each
 time round. Each loop's end is also crossfaded over 20 ms into what precedes
 its start. Other formats (FLAC, Ogg) go to `decodeAudioData`.
+
+### Decent Sampler presets
+
+A Decent Sampler preset (`.dspreset`, the format of [Pianobook](https://www.pianobook.co.uk)
+and [Decent Samples](https://www.decentsamples.com)) plays as it is, read as
+SFZ on the way (`dspreset.js`): `synth: { dspreset: "…/Violin.dspreset" }`,
+and `group: "name"` for one of its groups.
+
+What shapes the sound is kept: the groups on at load (all of them when a key
+switches the preset's single articulation on), velocity layers, round robins,
+loops and their crossfades, envelopes, legato (a phrase's first note, the
+transition recorded from the previous note, the notes it silences), and the
+knobs a MIDI controller turns, written on the recordings they touch: volume
+tables become crossfades or a level that follows the controller, an attack the
+wheel shortens, a peak filter the wheel opens. The interface's own effects
+(reverb, delay) are left to the piece.
+
+### Before building on an instrument, and making it play in tune
+
+```sh
+node tools/sfz-index.js /Volumes/instruments/jmon/sfz            # index.json, for essais/explorer.js
+node tools/inspect.js "…/Violin.dspreset"                         # what it holds, in one line
+node tools/inspect.js --index /Volumes/instruments/jmon/sfz pianobook   # inspect.json, shown in the explorer
+node tools/tuning.js "…/Violin.dspreset" violin.tuning.json       # a correction per recording
+```
+
+`inspect.js` reads the layout from the file (keys, velocity layers and forces
+faded by a controller, takes, legato, release sounds, key switches, loops) and
+measures a few recordings spread over the range: a recorded vibrato (how wide,
+how fast), how long a note takes to speak, how far it is from its note. A
+library whose recordings are straight cannot give a solo line its vibrato, and
+no setting will add it: look before writing an ison.
+
+`tuning.js` measures every recording's pitch on its steady part and writes the
+cents that bring each back to its note. Given as `tuning` beside `sfz` or
+`dspreset` (a URL or the table), the corrections apply as the file loads.
 
 ## Faust instruments
 

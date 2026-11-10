@@ -14,51 +14,9 @@
 // chord), and those more than 30 cents off (more likely a bad measurement; they are listed) are left out.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { execFileSync } from "node:child_process";
 import { dspresetToSfz } from "../src/dspreset.js";
 import { parseSfz } from "../src/sfz-parse.js";
-
-const RATE = 44100;
-
-/**
- * The median pitch of a sound, in cents from `expected` Hz, and how clearly
- * it has a pitch (0 to 1), from a normalised autocorrelation every 25 ms,
- * looking only within a semitone and a half of `expected` (no octave errors).
- *
- * @param {Float32Array} x - mono samples at 44.1 kHz
- * @param {number} expected - Hz
- * @returns {{cents: number, clarity: number}|null}
- */
-export function medianPitch(x, expected) {
-  const W = 2048;
-  const from = Math.floor(x.length / 2), to = Math.min(x.length - 2 * W, from + 3 * RATE);
-  const lo = Math.floor(RATE / (expected * 2 ** (1.5 / 12))), hi = Math.ceil(RATE / (expected / 2 ** (1.5 / 12)));
-  const cents = [], clarities = [];
-  for (let s = from; s < to; s += Math.round(RATE / 40)) {
-    let energy = 0;
-    for (let i = 0; i < W; i++) energy += x[s + i] * x[s + i];
-    if (energy < 1e-6) continue;
-    const at = (lag) => {
-      let c = 0, e = 0;
-      for (let i = 0; i < W; i++) { c += x[s + i] * x[s + i + lag]; e += x[s + i + lag] * x[s + i + lag]; }
-      return (2 * c) / (energy + e);
-    };
-    let best = -Infinity, lag = 0;
-    for (let l = lo; l <= hi; l++) { const c = at(l); if (c > best) { best = c; lag = l; } }
-    const a = at(lag - 1), z = at(lag + 1);
-    const exact = lag + (a - z) / (2 * (a - 2 * best + z) || 1);
-    cents.push(1200 * Math.log2(RATE / exact / expected));
-    clarities.push(best);
-  }
-  if (cents.length < 3) return null;
-  const median = (list) => [...list].sort((p, q) => p - q)[Math.floor(list.length / 2)];
-  return { cents: median(cents), clarity: median(clarities) };
-}
-
-function decode(file) {
-  const bytes = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-ac", "1", "-ar", String(RATE), "-f", "f32le", "-"], { maxBuffer: 1 << 30 });
-  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4);
-}
+import { decode, medianPitch } from "./measure.js";
 
 const main = () => {
   const [file, out] = process.argv.slice(2);
