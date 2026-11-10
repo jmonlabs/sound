@@ -21,7 +21,8 @@ const fakeTone = () => {
     rawContext: { name: "raw", audioWorklet: { loaded: [], addModule: async function (url) { this.loaded.push(url); } } },
     // Like Tone 14: one module per context, whichever was asked for first.
     addAudioWorkletModule: async () => {},
-    createAudioWorkletNode: () => ({ name: "worklet" }),
+    // A worklet node with a port, as the shipped engine expects: it talks to its processor through it.
+    createAudioWorkletNode: () => ({ name: "worklet", context, port: { onmessage: null, postMessage() {} }, connect() { return this; }, disconnect() {} }),
   };
   class Gain {
     constructor() { this.input = { name: "gain" }; this.connected = []; }
