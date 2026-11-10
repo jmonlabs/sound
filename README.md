@@ -194,12 +194,12 @@ bank plays General MIDI programs:
 sound.useSoundfont({
   library: "/vendor/spessasynth/spessasynth_lib.js",
   processor: "/vendor/spessasynth/spessasynth_processor.min.js",
-  bank: "/samples/soundfonts/MuseScore_General.sf3", // optional: { gm } tracks
+  bank: "/samples/sf/musescore/MuseScore_General.sf3", // optional: { gm } tracks
 });
 
 { gm: 40 }                                        // violin, from the bank above
 { sf2: "/samples/soundfonts/GeneralUser-GS.sf2", program: 0 }  // any bank, per track
-{ sf2: "/samples/soundfonts/MuseScore_General.sf3", program: 40, bankSelect: 8 } // a variation
+{ sf2: "/samples/sf/musescore/MuseScore_General.sf3", program: 40, bankSelect: 8 } // a variation
 ```
 
 Each bank file gets a synthesizer of its own, with its own bank numbers and 15
