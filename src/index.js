@@ -431,14 +431,56 @@ export function performPiece(piece) {
   if (!piece || !Array.isArray(piece.tracks)) return piece;
   const tempo = piece.tempo ?? piece.bpm ?? 120;
   let changed = false;
-  const tracks = piece.tracks.map((track) => {
-    const spec = track?.synth;
-    if (!isIsonSpec(spec) || (!spec.play && !hasLayers(spec))) return track;
-    changed = true;
-    const key = Array.isArray(track.notes) ? "notes" : "events";
-    return { ...track, [key]: performIson(spec, track[key] ?? [], { tempo }) };
+  const tracks = piece.tracks.map((track, index) => {
+    let spec = track?.synth;
+    if (!isIsonSpec(spec)) return track;
+    let out = track;
+    // A control the piece writes on this track (a lane, `track.cc`, a note's
+    // modulations) is the piece's to move: the velocity stops turning it.
+    const written = writtenControls(piece, track, index);
+    const taken = Object.entries(spec.controls ?? {}).filter(([name, control]) => control?.velocity === true && (written.names.has(name) || written.ccs.has(control.cc)));
+    if (taken.length) {
+      const controls = { ...spec.controls };
+      for (const [name, control] of taken) controls[name] = { ...control, velocity: false };
+      spec = { ...spec, controls };
+      out = { ...out, synth: spec };
+      changed = true;
+    }
+    if (spec.play || hasLayers(spec)) {
+      const key = Array.isArray(track.notes) ? "notes" : "events";
+      out = { ...out, [key]: performIson(spec, track[key] ?? [], { tempo }) };
+      changed = true;
+    }
+    return out;
   });
   return changed ? { ...piece, tracks } : piece;
+}
+
+/**
+ * The controls a piece writes for one track, by name (an automation lane
+ * whose target is the control's name) and by controller number (a lane on
+ * `midi.ccN`, `track.cc`, a note's `modulations`).
+ */
+function writtenControls(piece, track, index) {
+  const names = new Set(), ccs = new Set();
+  const automation = piece.automation ?? {};
+  const lanes = [
+    ...(automation.global ?? []),
+    ...(automation.tracks?.[track.label] ?? []),
+    ...(automation.tracks?.[index] ?? []),
+    ...(Array.isArray(track.automation) ? track.automation : []),
+  ];
+  for (const lane of lanes) {
+    if (typeof lane?.target !== "string") continue;
+    const cc = /^midi\.cc(\d+)$/.exec(lane.target);
+    if (cc) ccs.add(Number(cc[1]));
+    else names.add(lane.target);
+  }
+  for (const c of Array.isArray(track.cc) ? track.cc : []) ccs.add(Number(c?.controller ?? c?.cc));
+  for (const note of track.notes ?? []) {
+    for (const m of note?.modulations ?? []) if (m?.type === "cc") ccs.add(Number(m.controller));
+  }
+  return { names, ccs };
 }
 
 /**

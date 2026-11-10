@@ -261,3 +261,22 @@ test("a control that follows the velocity: each note turns it to its own velocit
   node.triggerAttack(65, 3, 0.9, 1);
   assert.deepEqual(node.nodes[0].moves, [[1, 0.44, 1], [1, 0.9, 3]], "CC1 only, not the brightness, at each note's start");
 });
+
+test("a control the piece writes on a track is the piece's: the velocity stops turning it there", () => {
+  const bowed = {
+    format: "ison", version: "1.0", name: "Bowed",
+    sources: { synth: { type: "Synth" } },
+    modes: { sustain: { source: "synth" } },
+    controls: { dynamics: { cc: 1, default: 0.7, velocity: true } },
+  };
+  const notes = [{ pitch: 62, time: 0, duration: 4, velocity: 0.5 }];
+  const free = sound.performPiece({ tempo: 60, tracks: [{ label: "Violin", synth: bowed, notes }] });
+  assert.equal(free.tracks?.[0].synth.controls.dynamics.velocity ?? true, true, "nothing written: the velocity drives it");
+  const byName = sound.performPiece({ tempo: 60, automation: { tracks: { Violin: [{ target: "dynamics", anchorPoints: [{ time: 0, value: 0.2 }, { time: 4, value: 1 }] }] } }, tracks: [{ label: "Violin", synth: bowed, notes }] });
+  assert.equal(byName.tracks[0].synth.controls.dynamics.velocity, false, "a lane by the control's name");
+  const byCc = sound.performPiece({ tempo: 60, tracks: [{ label: "Violin", synth: bowed, notes: [{ ...notes[0], modulations: [{ type: "cc", controller: 1, value: 90, time: 0 }] }] }] });
+  assert.equal(byCc.tracks[0].synth.controls.dynamics.velocity, false, "a note's own moves on CC1");
+  const other = sound.performPiece({ tempo: 60, automation: { tracks: { Cello: [{ target: "dynamics", anchorPoints: [{ time: 0, value: 0.2 }] }] } }, tracks: [{ label: "Violin", synth: bowed, notes }] });
+  assert.equal(other.tracks?.[0].synth.controls.dynamics.velocity ?? true, true, "another track's lane changes nothing here");
+  assert.equal(bowed.controls.dynamics.velocity, true, "the instrument itself is untouched");
+});
