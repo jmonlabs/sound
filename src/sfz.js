@@ -16,7 +16,7 @@
  *
  * Opcodes read: the key and velocity ranges, crossfades, round robins
  * (seq_length, seq_position), random choice (lorand, hirand), key switches
- * (sw_*), release triggers, legato triggers (first, legato), choke groups
+ * (sw_*, sw_previous), release triggers, legato triggers (first, legato), choke groups
  * (group, off_by, off_mode, off_time), tuning,
  * volume, pan, velocity tracking, the amplitude envelope (ampeg_*, with
  * velocity), delays and offsets, loops (from the file or the opcodes), the
@@ -154,10 +154,14 @@ function bufferIn(context, url) {
  * @param {number|null} note.keyswitch - the last key switch pressed
  * @param {Object} [note.controllers] - controller number → 0..127, for
  *   regions that play only within a controller's range (loccN, hiccN)
+ * @param {number|null} [note.previous] - the key played before this one, for
+ *   `sw_previous`
  * @returns {number} the region's share of the note, 0 when it is silent
  */
-export function regionWeight(region, { key, velocity, trigger, legato = false, random, round, keyswitch, controllers = {} }) {
+export function regionWeight(region, { key, velocity, trigger, legato = false, random, round, keyswitch, controllers = {}, previous = null }) {
   if (key < (region.lokey ?? 0) || key > (region.hikey ?? 127)) return 0;
+  // `sw_previous`: only after that key (a recorded transition from one note to the next).
+  if (typeof region.sw_previous === "number" && trigger !== "release" && previous !== region.sw_previous) return 0;
   if (velocity < (region.lovel ?? 1) || velocity > (region.hivel ?? 127)) return 0;
   if (!answersTrigger(region.trigger ?? "attack", trigger, legato)) return 0;
   if (random < (region.lorand ?? 0) || random >= (region.hirand ?? 1.0001)) return 0;
@@ -643,7 +647,8 @@ class SfzInstrument {
     const legato = trigger === "attack"
       && this.voices.some((v) => v.trigger !== "release" && v.start < at && v.releasedAt >= at);
     const controllers = this.controllersAt(file, at);
-    const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch, controllers };
+    const note = { key, velocity, trigger, legato, random, round, keyswitch: file.keyswitch, controllers, previous: this.previousKey ?? null };
+    if (trigger === "attack") this.previousKey = key;
     const started = [];
     for (const region of file.regions) {
       const weight = regionWeight(region, note);

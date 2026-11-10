@@ -19,6 +19,11 @@
  *   gives a group or the whole instrument;
  * - a group's own peak filter is a band of EQ;
  * - a loop's crossfade (`loopCrossfade`, in frames) is `loop_crossfade`;
+ * - legato: a group that plays only on a phrase's first note or only on a
+ *   slurred one (`trigger="first"`, `"legato"`), a transition recorded from
+ *   one note (`previousNotes`, SFZ `sw_previous`), and the notes a tag
+ *   silences when it sounds (`silencedByTags`, a choke group: `group`,
+ *   `off_by`, `off_mode`);
  * - a group the preset switches on and off (an articulation, a microphone) is
  *   chosen by name with `group`. Without it, the groups on at load play; if
  *   none is (a preset whose single articulation a key switches on), all of them.
@@ -56,7 +61,13 @@ function opcodes(a) {
   if (a.rootNote !== undefined) out.push(`pitch_keycenter=${a.rootNote}`);
   if (a.loVel !== undefined) out.push(`lovel=${a.loVel}`);
   if (a.hiVel !== undefined) out.push(`hivel=${a.hiVel}`);
-  if (a.trigger === "release") out.push("trigger=release");
+  if (a.trigger === "release" || a.trigger === "first" || a.trigger === "legato") out.push(`trigger=${a.trigger}`);
+  // A recorded transition: the sample plays only after that note.
+  if (a.previousNotes !== undefined && /^\d+$/.test(a.previousNotes.trim())) out.push(`sw_previous=${a.previousNotes.trim()}`);
+  for (const [name, value] of Object.entries(a)) {
+    const range = /^(lo|hi)CC(\d+)$/.exec(name);
+    if (range) out.push(`${range[1]}cc${range[2]}=${value}`);
+  }
   if (a.ampEnvEnabled !== "false") {
     if (a.attack !== undefined) out.push(`ampeg_attack=${a.attack}`);
     if (a.decay !== undefined) out.push(`ampeg_decay=${a.decay}`);
@@ -247,6 +258,10 @@ export function dspresetToSfz(xml, { group } = {}) {
   // A knob that fades groups into one another only means something when they play together.
   const fading = !group;
 
+  // A tag that silences notes (`silencedByTags`): the recordings carrying it
+  // form a choke group, and the groups it silences are turned off by it.
+  const chokes = {};
+  for (const g of groups) for (const tag of (g.attributes.silencedByTags ?? "").split(",").map((t) => t.trim()).filter(Boolean)) chokes[tag] ??= Object.keys(chokes).length + 1;
   const inherited = {};
   for (const key of ["ampVelTrack", "attack", "decay", "sustain", "release"]) if (face.groupsAttributes[key] !== undefined) inherited[key] = face.groupsAttributes[key];
   const lines = [];
@@ -262,6 +277,9 @@ export function dspresetToSfz(xml, { group } = {}) {
     }
     const head = opcodes(a);
     if (a.seqMode === "round_robin" && a.seqLength) head.push(`seq_length=${a.seqLength}`);
+    if (Number(a.start) > 0) head.push(`offset=${a.start}`);
+    const silencedBy = (a.silencedByTags ?? "").split(",").map((t) => t.trim()).find((t) => chokes[t]);
+    if (silencedBy) head.push(`off_by=${chokes[silencedBy]}`, `off_mode=${a.silencingMode === "normal" ? "normal" : "fast"}`);
     const own = face.groups[g.position].opcodes.filter((o) => fading || !/^xf/.test(o));
     head.push(...own);
     g.peaks.slice(0, 3).forEach((band, k) => {
@@ -288,8 +306,11 @@ export function dspresetToSfz(xml, { group } = {}) {
         if (a.seqMode === "round_robin") r.push(`seq_position=${k}`);
         else r.push(`lorand=${((k - 1) / seqLength).toFixed(4)} hirand=${(k / seqLength).toFixed(4)}`);
       }
+      const tags = (s.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+      const choke = tags.find((t) => chokes[t]);
+      if (choke) r.push(`group=${chokes[choke]}`);
       // What the knobs do to the recordings carrying a tag.
-      for (const tag of (s.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean)) {
+      for (const tag of tags) {
         for (const o of face.tags[tag] ?? []) if (!r.some((x) => x.split("=")[0] === o.split("=")[0])) r.push(o);
       }
       lines.push(`<region> ${r.join(" ")}`);

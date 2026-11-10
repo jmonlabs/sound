@@ -383,3 +383,11 @@ test("a level and a peak filter follow the mod wheel, the filter on the file's o
   assert.equal(plan.gain, 10 ** (40 * Math.log10(100 / 127) / 20), "the level the wheel gives is the control gain's, not counted twice");
   assert.ok(plan.eq[0].moves, "a band the wheel moves is kept even at 0 dB");
 });
+
+test("sw_previous: a transition plays only after the note it was recorded from", () => {
+  const region = { sample: "legato_C4_D4.flac", lokey: 62, hikey: 62, trigger: "legato", sw_previous: 60 };
+  const note = { key: 62, velocity: 100, trigger: "attack", legato: true, random: 0.5, round: 0, keyswitch: null };
+  assert.equal(regionWeight(region, { ...note, previous: 60 }), 1);
+  assert.equal(regionWeight(region, { ...note, previous: 64 }), 0, "from mi4, another transition");
+  assert.equal(regionWeight(region, { ...note, previous: 60, legato: false }), 0, "a detached note has no transition");
+});

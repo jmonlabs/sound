@@ -118,3 +118,31 @@ test("a preset whose forces are made by the mod wheel: level, filter and attack 
   assert.ok(r.eq1_gain_curvecc1[64] > 0.8, "half way up the wheel, the filter has given back most of its cut");
   assert.equal(r.loop_crossfade, 0.272, "12000 frames at 44.1 kHz");
 });
+
+test("legato: a phrase's first note, a transition recorded from the previous note, and the notes it silences", () => {
+  const legato = `<?xml version="1.0"?>
+<DecentSampler>
+  <groups volume="1" ampVelTrack="0">
+    <group name="Start" trigger="first" silencedByTags="legato" silencingMode="normal" enabled="false">
+      <sample path="D4.flac" tags="sustain" rootNote="62" loNote="62" hiNote="63" />
+    </group>
+    <group name="Transition" trigger="legato" attack="0.3" decay="0.7" sustain="0" volume="0.35" start="1500" enabled="false">
+      <sample path="legato_C4_D4.flac" tags="legato,legato_transition" rootNote="62" loNote="62" hiNote="62" loCC1="0" hiCC1="127" previousNotes="60" />
+    </group>
+    <group name="Sustain" trigger="legato" attack="2.5" silencedByTags="legato" silencingMode="normal" enabled="false">
+      <sample path="D4.flac" tags="legato-sustain" rootNote="62" loNote="62" hiNote="63" start="22050" />
+    </group>
+  </groups>
+</DecentSampler>`;
+  const [start, transition, sustain] = parseSfz(dspresetToSfz(legato)).regions;
+  assert.equal(start.trigger, "first");
+  assert.deepEqual([start.off_by, start.off_mode], [1, "normal"], "a transition starting lets the first note go, through its release");
+  assert.equal(transition.trigger, "legato");
+  assert.equal(transition.sw_previous, 60, "the transition from do4");
+  assert.equal(transition.group, 1, "the recordings tagged legato are the choke group");
+  assert.equal(transition.offset, 1500, "the group's start");
+  assert.equal(transition.volume, -9.119, "0.35 as a factor");
+  assert.deepEqual([transition.locc1, transition.hicc1], [0, 127]);
+  assert.equal(sustain.off_by, 1);
+  assert.equal(sustain.offset, 22050);
+});

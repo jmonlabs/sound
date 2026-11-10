@@ -39,7 +39,7 @@ export function sfzKey(value) {
 /** Opcodes whose value is a key, read as MIDI numbers. */
 const KEY_OPCODES = new Set([
   "key", "lokey", "hikey", "pitch_keycenter",
-  "sw_lokey", "sw_hikey", "sw_last", "sw_default", "sw_down", "sw_up",
+  "sw_lokey", "sw_hikey", "sw_last", "sw_default", "sw_down", "sw_up", "sw_previous",
   "xfin_lokey", "xfin_hikey", "xfout_lokey", "xfout_hikey", "fil_keycenter",
 ]);
 
