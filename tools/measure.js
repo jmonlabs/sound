@@ -105,3 +105,22 @@ export function speechOf(x) {
   const spoken = env.findIndex((v) => v > peak / 2);
   return (spoken - first) * 10;
 }
+
+/**
+ * When a note is heard, from the start of what the player plays (`offset`
+ * frames in, where the file says the note begins): the time its level first
+ * reaches -10 dB of the peak of its attack (the first 0.6 s), in seconds.
+ */
+export function heardAt(x, offset = 0) {
+  const W = 220, env = [];
+  for (let i = offset; i + W < Math.min(x.length, offset + 1.5 * RATE); i += W) {
+    let e = 0;
+    for (let j = i; j < i + W; j++) e += x[j] * x[j];
+    env.push(Math.sqrt(e / W));
+  }
+  // The peak of the attack (the first 0.6 s), not of a swell that comes later in a held note.
+  const peak = Math.max(...env.slice(0, Math.ceil((0.6 * RATE) / W)));
+  if (!(peak > 0)) return null;
+  const at = env.findIndex((v) => v >= peak * 10 ** (-10 / 20));
+  return +((at * W) / RATE).toFixed(3);
+}

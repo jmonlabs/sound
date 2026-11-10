@@ -135,6 +135,7 @@ export function readSpec(spec) {
         sfz: spec.sfz ?? spec.dspreset,
         ...(spec.group !== undefined ? { group: spec.group } : {}),
         ...(spec.tuning !== undefined ? { tuning: spec.tuning } : {}),
+        ...(spec.ampVeltrack !== undefined ? { ampVeltrack: spec.ampVeltrack } : {}),
         staccato: spec.staccato,
         staccatoUnder: spec.staccatoUnder,
         envelope: spec.envelope,
@@ -447,7 +448,7 @@ export function performPiece(piece) {
       out = { ...out, synth: spec };
       changed = true;
     }
-    if (spec.play || hasLayers(spec)) {
+    if (spec.play || hasLayers(spec) || Object.values(spec.modes ?? {}).some((mode) => mode?.speech)) {
       const key = Array.isArray(track.notes) ? "notes" : "events";
       out = { ...out, [key]: performIson(spec, track[key] ?? [], { tempo }) };
       changed = true;

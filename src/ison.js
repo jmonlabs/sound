@@ -142,7 +142,25 @@ export function performIson(ison, notes, { tempo = 120 } = {}) {
       else out.push(stroke);
     }
   }
-  return out;
+  return out.map((note) => early(note, modes[note?.variant ?? base], tempo));
+}
+
+/**
+ * A note started as much earlier as its recording takes to be heard (the
+ * mode's `speech`: seconds, or seconds by MIDI key, see tools/speech.js), and
+ * as much longer, so it is heard on its beat and still ends where written.
+ * The bow's attack is played whole, only sooner. Never before the piece starts.
+ */
+export function early(note, mode, tempo) {
+  const speech = mode?.speech;
+  if (!speech || !note || note.pitch === null || note.pitch === undefined || !(note.duration > 0)) return note;
+  const key = Math.round([].concat(note.pitch)[0] + (note.tuning ?? 0));
+  const seconds = typeof speech === "number" ? speech : speech[key] ?? null;
+  if (!(seconds > 0)) return note;
+  const beats = Math.min((seconds * tempo) / 60, note.time);
+  if (!(beats > 0)) return note;
+  // A loudness curve (a bow's shape) starts with the note, where the bow does.
+  return { ...note, time: note.time - beats, duration: note.duration + beats };
 }
 
 /** One note per layer of its mode (see performIson). */
@@ -439,7 +457,10 @@ class IsonInstrument {
   velocityControls(node, velocity, time) {
     const own = {};
     for (const control of Object.values(this.ison.controls ?? {})) {
-      if (control?.velocity === true && typeof control.cc === "number") own[control.cc] = Math.max(0, Math.min(1, velocity));
+      if (control?.velocity !== true || typeof control.cc !== "number") continue;
+      // The velocity, 0 to 1, within the control's `range`: [0.3, 1] keeps the softest notes audible.
+      const [low, high] = Array.isArray(control.range) && control.range.length === 2 ? control.range : [0, 1];
+      own[control.cc] = Math.max(0, Math.min(1, low + Math.max(0, Math.min(1, velocity)) * (high - low)));
     }
     if (Object.keys(own).length === 0) return null;
     if (node?.isSfz) return own;

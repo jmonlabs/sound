@@ -455,6 +455,8 @@ function seededRandom(seed) {
  * @param {string} [spec.staccato] - an SFZ file for short notes
  * @param {number} [spec.staccatoUnder=0.3] - seconds: notes shorter than
  *   this play the staccato file
+ * @param {number} [spec.ampVeltrack] - percent, how much the velocity sets
+ *   the level, over the file's own `amp_veltrack`
  * @param {string|Object} [spec.tuning] - corrections in cents by recording
  *   (as the file writes its path), a URL or the table: see tools/tuning.js
  * @param {Object} [spec.envelope] - `{ attack, hold, decay, sustain,
@@ -471,7 +473,7 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, group, tuning, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
+  constructor(Tone, { sfz, group, tuning, ampVeltrack, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -493,6 +495,10 @@ class SfzInstrument {
     this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group, tuning }) : null)))
       .then(async (files) => {
         // Given the track's notes, only the regions they can play are kept, and only their recordings load.
+        // `ampVeltrack` (percent): how much the velocity sets the level, over what the file says. A
+        // preset whose sustained notes ignore it (their force is the mod wheel) can be made to follow
+        // a piece written in velocities.
+        if (typeof ampVeltrack === "number") for (const file of files) for (const r of file?.regions ?? []) r.amp_veltrack = ampVeltrack;
         const [sustain, short] = files.map((file) => (file && notes ? { ...file, regions: regionsForNotes(file.regions, notes) } : file));
         const all = [sustain, short].filter(Boolean);
         const urls = new Set(all.flatMap((file) => file.regions.map((r) => r.sample)));

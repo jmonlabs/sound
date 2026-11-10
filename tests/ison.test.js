@@ -302,3 +302,37 @@ test("two notes together keep their own force: a sampler gets each note's veloci
   assert.deepEqual(node.nodes[0].attacks.map(([, c]) => c), [{ 1: 1 }, { 1: 0.55 }], "each note its own CC1");
   assert.equal(node.nodes[0].moves, undefined, "no shared move that would pull the other note along");
 });
+
+test("a mode that speaks late starts each note as much earlier, by key, and still ends where written", () => {
+  const bowed = {
+    format: "ison", version: "1.0", name: "Bowed",
+    sources: { s: { type: "Synth" } },
+    modes: { sustain: { source: "s", speech: { 62: 0.1, 64: 0.05 } }, spiccato: { source: "s" } },
+  };
+  const notes = [
+    { pitch: 62, time: 2, duration: 1, velocity: 0.5 },
+    { pitch: 64, time: 3, duration: 1, velocity: 0.5 },
+    { pitch: 62, time: 0, duration: 1, velocity: 0.5 },
+    { pitch: 62, time: 4, duration: 1, velocity: 0.5, variant: "spiccato" },
+  ];
+  const [a, b, first, short] = sound.performIson(bowed, notes, { tempo: 60 });
+  assert.deepEqual([a.time, a.time + a.duration], [1.9, 3], "0.1 s earlier at 60 BPM, same end");
+  assert.ok(Math.abs(b.time - 2.95) < 1e-9);
+  assert.equal(first.time, 0, "never before the piece starts");
+  assert.equal(short.time, 4, "a mode without speech times plays as written");
+  const piece = sound.performPiece({ tempo: 60, tracks: [{ label: "V", synth: bowed, notes: [notes[0]] }] });
+  assert.equal(piece.tracks[0].notes[0].time, 1.9, "the player gets the earlier note");
+});
+
+test("a velocity-following control within its range", () => {
+  const Tone = fakeTone();
+  Tone.now = () => 0;
+  class Sampled extends Tone.FMSynth { constructor(o) { super(o); this.isSfz = true; this.attacks = []; } triggerAttack(n, t, v, d, options) { this.attacks.push(options?.controllers); return this; } }
+  Tone.Sampled = Sampled;
+  const bowed = { format: "ison", version: "1.0", name: "B", sources: { s: { type: "Sampled" } }, modes: { m: { source: "s" } }, controls: { dynamics: { cc: 1, default: 0.7, velocity: true, range: [0.3, 1] } } };
+  const { node } = sound.create(bowed, Tone, { notes: [] });
+  node.triggerAttack([62], 0, 0, 1);
+  node.triggerAttack([62], 1, 1, 1);
+  node.triggerAttack([62], 2, 0.5, 1);
+  assert.deepEqual(node.nodes[0].attacks.map((c) => +c[1].toFixed(3)), [0.3, 1, 0.65]);
+});
