@@ -317,7 +317,8 @@ class IsonInstrument {
     if (typeof source.sfz === "string" || typeof source.dspreset === "string") {
       const spec = {
         ...source,
-        envelope: ison.envelope ?? source.envelope,
+        // The instrument's envelope over its source's, value by value: a piece that shortens the release keeps the source's attack.
+        envelope: (ison.envelope || source.envelope) ? { ...(source.envelope ?? {}), ...(ison.envelope ?? {}) } : undefined,
         start: mode.start ?? source.start,
         controls: { ...(source.controls ?? {}), ...(mode.controls ?? {}) },
         // The instrument's controls start where it says (`default`), as for a SoundFont.

@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSfz, readWav, sfzKey } from "../src/sfz-parse.js";
-import { controlPlan, envelopeLevel, regionsForNotes, regionWeight, voicePlan } from "../src/sfz.js";
+import { controlPlan, envelopeLevel, loadSfzFile, regionsForNotes, regionWeight, voicePlan } from "../src/sfz.js";
 
 const sound = await import("../src/index.js");
 
@@ -390,4 +390,19 @@ test("sw_previous: a transition plays only after the note it was recorded from",
   assert.equal(regionWeight(region, { ...note, previous: 60 }), 1);
   assert.equal(regionWeight(region, { ...note, previous: 64 }), 0, "from mi4, another transition");
   assert.equal(regionWeight(region, { ...note, previous: 60, legato: false }), 0, "a detached note has no transition");
+});
+
+test("a tuning table corrects each recording by its own cents, a URL or the table itself", async () => {
+  serve({
+    "violin.sfz": "<region> sample=Samples/D4.flac pitch_keycenter=62 tune=5\n<region> sample=Samples/E4.flac pitch_keycenter=64",
+    "violin.tuning.json": JSON.stringify({ "Samples/D4.flac": -12 }),
+  });
+  globalThis.fetch = ((serveText) => async (url) => {
+    const response = await serveText(url);
+    return { ...response, json: async () => JSON.parse(await response.text()) };
+  })(globalThis.fetch);
+  const byUrl = await loadSfzFile("https://x/violin.sfz", { tuning: "https://x/violin.tuning.json" });
+  assert.deepEqual(byUrl.regions.map((r) => r.tune ?? 0), [-7, 0], "D4 down 12 cents from its own +5; E4 untouched");
+  const byTable = await loadSfzFile("https://x/violin.sfz", { tuning: { "Samples/E4.flac": 8 } });
+  assert.deepEqual(byTable.regions.map((r) => r.tune ?? 0), [5, 8]);
 });

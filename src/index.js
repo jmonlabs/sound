@@ -134,6 +134,7 @@ export function readSpec(spec) {
         kind: "sfz",
         sfz: spec.sfz ?? spec.dspreset,
         ...(spec.group !== undefined ? { group: spec.group } : {}),
+        ...(spec.tuning !== undefined ? { tuning: spec.tuning } : {}),
         staccato: spec.staccato,
         staccatoUnder: spec.staccatoUnder,
         envelope: spec.envelope,

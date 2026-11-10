@@ -56,7 +56,7 @@ const RELEASE_FLOOR = 0.001;
  * @returns {Promise<{url: string, control: Object, regions: Array<Object>}>}
  *   each region's `sample` resolved to a URL
  */
-export async function loadSfzFile(url, { group } = {}) {
+export async function loadSfzFile(url, { group, tuning } = {}) {
   const absolute = new URL(url, globalThis.location?.href ?? "file:///").href;
   const texts = {};
   const fetchText = async (fileUrl) => {
@@ -74,7 +74,10 @@ export async function loadSfzFile(url, { group } = {}) {
     pending.push(...sfzIncludes(texts[path]));
   }
   const { control, regions } = parseSfz(main, { include: (path) => texts[path] });
+  // A table of corrections, recording → cents (see tools/tuning.js): a URL, or the table.
+  const corrections = typeof tuning === "string" ? await (await fetch(new URL(tuning, globalThis.location?.href ?? "file:///").href)).json() : (tuning ?? {});
   for (const region of regions) {
+    if (region.sample && corrections[region.sample]) region.tune = (region.tune ?? 0) + corrections[region.sample];
     if (region.sample) region.sample = new URL(samplePath(region.sample), absolute).href;
   }
   return { url: absolute, control, regions: regions.filter((r) => r.sample && !r.sample.startsWith("*")) };
@@ -452,6 +455,8 @@ function seededRandom(seed) {
  * @param {string} [spec.staccato] - an SFZ file for short notes
  * @param {number} [spec.staccatoUnder=0.3] - seconds: notes shorter than
  *   this play the staccato file
+ * @param {string|Object} [spec.tuning] - corrections in cents by recording
+ *   (as the file writes its path), a URL or the table: see tools/tuning.js
  * @param {Object} [spec.envelope] - `{ attack, hold, decay, sustain,
  *   release }`, overriding the file's own envelope
  * @param {number} [spec.volume=0] - dB
@@ -466,7 +471,7 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, group, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
+  constructor(Tone, { sfz, group, tuning, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -485,7 +490,7 @@ class SfzInstrument {
     // The piece's controller moves, as they arrive: number → [{ time, value 0..127 }].
     this.moves = new Map();
 
-    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group }) : null)))
+    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group, tuning }) : null)))
       .then(async (files) => {
         // Given the track's notes, only the regions they can play are kept, and only their recordings load.
         const [sustain, short] = files.map((file) => (file && notes ? { ...file, regions: regionsForNotes(file.regions, notes) } : file));
@@ -497,6 +502,14 @@ class SfzInstrument {
           this.buffers.set(url, await bufferIn(this.context, url));
           this.recordings.set(url, await recording(url));
         }));
+        // The loops a file crossfades are blended now, while loading, not when a
+        // note first plays them: that copy would make the note late.
+        for (const region of all.flatMap((file) => file.regions)) {
+          const buffer = this.buffers.get(region.sample);
+          if (buffer && region.loop_crossfade > 0 && region.loop_end > region.loop_start && region.loop_mode !== "no_loop" && region.loop_mode !== "one_shot") {
+            this.crossfadedBuffer(region.sample, buffer, region.loop_start, region.loop_end, region.loop_crossfade);
+          }
+        }
         this.files = {
           sustain: this.readyFile(sustain),
           staccato: short ? this.readyFile(short) : null,
