@@ -428,9 +428,22 @@ class IsonInstrument {
     return node?.frequency !== undefined && node?.voices === undefined && node?.isSoundfont !== true && node?.isSfz !== true && node?.isFaust !== true;
   }
 
+  /**
+   * The controls that follow the velocity (`"velocity": true`): each note
+   * turns them to its velocity as it starts, the way a player's hand sets the
+   * mod wheel for the next note. For a source whose force is a controller,
+   * not the velocity (a Decent Sampler preset's sustained notes).
+   */
+  velocityControls(node, velocity, time) {
+    for (const control of Object.values(this.ison.controls ?? {})) {
+      if (control?.velocity === true && typeof control.cc === "number") node.controllerChange?.(control.cc, Math.max(0, Math.min(1, velocity)), time ?? this.Tone.now());
+    }
+  }
+
   triggerAttack(notes, time, velocity = 1, duration, options) {
     const node = this.nodeFor(options?.variant);
     if (!node) return this;
+    this.velocityControls(node, velocity, time);
     // A synth whose last note had a loudness curve starts again at its level.
     if (this.shapedNodes?.has(node)) node.volume.setValueAtTime(this.shapedNodes.get(node), this.Tone.Time(time ?? this.Tone.now()).toSeconds());
     for (const note of [].concat(notes)) this.started(this.midiOf(note), node);
@@ -451,6 +464,7 @@ class IsonInstrument {
 
   triggerAttackRelease(notes, duration, time, velocity = 1, options) {
     const node = this.nodeFor(options?.variant);
+    if (node) this.velocityControls(node, velocity, time);
     node?.triggerAttackRelease(notes, duration, time, this.velocityOf(velocity), options);
     return this;
   }

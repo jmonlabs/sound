@@ -244,3 +244,20 @@ test("a mode of layers builds no sound of its own; a control turns a mode's leve
   assert.deepEqual(node.byMode.body.played.at(-1), ["off", 4]);
   assert.deepEqual(node.byMode.light.played.at(-1), ["off", 4.5]);
 });
+
+test("a control that follows the velocity: each note turns it to its own velocity as it starts", () => {
+  const Tone = fakeTone();
+  Tone.now = () => 0;
+  class Played extends Tone.FMSynth { controllerChange(cc, value, time) { (this.moves ??= []).push([cc, value, time]); } }
+  Tone.Played = Played;
+  const bowed = {
+    format: "ison", version: "1.0", name: "Bowed",
+    sources: { synth: { type: "Played" } },
+    modes: { sustain: { source: "synth" } },
+    controls: { dynamics: { cc: 1, default: 0.7, velocity: true }, brightness: { cc: 74, default: 0.5 } },
+  };
+  const { node } = sound.create(bowed, Tone, { notes: [] });
+  node.triggerAttack(62, 1, 0.44, 2);
+  node.triggerAttack(65, 3, 0.9, 1);
+  assert.deepEqual(node.nodes[0].moves, [[1, 0.44, 1], [1, 0.9, 3]], "CC1 only, not the brightness, at each note's start");
+});
