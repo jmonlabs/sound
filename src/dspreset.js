@@ -278,7 +278,7 @@ export function dspresetToSfz(xml, { group } = {}) {
   const chokes = {};
   for (const g of groups) for (const tag of (g.attributes.silencedByTags ?? "").split(",").map((t) => t.trim()).filter(Boolean)) chokes[tag] ??= Object.keys(chokes).length + 1;
   const inherited = {};
-  for (const key of ["ampVelTrack", "attack", "decay", "sustain", "release"]) if (face.groupsAttributes[key] !== undefined) inherited[key] = face.groupsAttributes[key];
+  for (const key of ["ampVelTrack", "attack", "decay", "sustain", "release", "seqMode", "seqLength"]) if (face.groupsAttributes[key] !== undefined) inherited[key] = face.groupsAttributes[key];
   const lines = [];
   if (face.control.length) lines.push(`<control> ${face.control.join(" ")}`);
   lines.push(...face.curves);
@@ -316,10 +316,13 @@ export function dspresetToSfz(xml, { group } = {}) {
         // In frames in the preset, in seconds in SFZ: the recordings are taken at 44.1 kHz, near enough for a fade.
         if (Number(s.loopCrossfade) > 0) r.push(`loop_crossfade=${round(Number(s.loopCrossfade) / 44100)}`);
       }
-      if (s.seqPosition !== undefined && seqLength > 1) {
+      // Takes in turn: the mode from the group or <groups>, the length from the sample (each note may
+      // have its own number of takes) or the group.
+      const takes = Number(s.seqLength) || seqLength;
+      if (s.seqPosition !== undefined && takes > 1) {
         const k = Number(s.seqPosition);
-        if (a.seqMode === "round_robin") r.push(`seq_position=${k}`);
-        else r.push(`lorand=${((k - 1) / seqLength).toFixed(4)} hirand=${(k / seqLength).toFixed(4)}`);
+        if (a.seqMode === "round_robin") r.push(`seq_length=${takes}`, `seq_position=${k}`);
+        else r.push(`lorand=${((k - 1) / takes).toFixed(4)} hirand=${(k / takes).toFixed(4)}`);
       }
       const tags = (s.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean);
       const choke = tags.find((t) => chokes[t]);

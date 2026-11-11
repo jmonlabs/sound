@@ -147,3 +147,17 @@ test("legato: a phrase's first note, a transition recorded from the previous not
   assert.equal(sustain.off_by, 1);
   assert.equal(sustain.offset, 22050);
 });
+
+test("takes in turn: the mode from <groups>, the number of takes from each sample", async () => {
+  const { dspresetToSfz } = await import("../src/dspreset.js");
+  const { parseSfz } = await import("../src/sfz-parse.js");
+  const preset = `<DecentSampler><groups seqMode="round_robin"><group>
+    <sample path="c1.wav" rootNote="60" loNote="60" hiNote="60" seqPosition="1" seqLength="2"/>
+    <sample path="c2.wav" rootNote="60" loNote="60" hiNote="60" seqPosition="2" seqLength="2"/>
+    <sample path="d1.wav" rootNote="62" loNote="62" hiNote="62" seqPosition="1" seqLength="3"/>
+  </group></groups></DecentSampler>`;
+  const { regions } = parseSfz(dspresetToSfz(preset));
+  const of = (name) => regions.find((r) => r.sample === name);
+  assert.deepEqual([of("c1.wav").seq_length, of("c1.wav").seq_position, of("c2.wav").seq_position], [2, 1, 2]);
+  assert.equal(of("d1.wav").seq_length, 3);
+});
