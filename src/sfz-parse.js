@@ -267,3 +267,73 @@ export function readWav(bytes) {
   if (loop && loop.end <= loop.start) loop = null;
   return { sampleRate, channels, loop };
 }
+
+/**
+ * An AIFF (or uncompressed AIFF-C) file's audio and the sustain loop its
+ * `INST` and `MARK` chunks carry, in the shape readWav gives. Browsers do not
+ * decode AIFF at all: some libraries record in it (Antz, at 24 bits).
+ *
+ * @param {ArrayBuffer} bytes - the whole file
+ * @returns {{sampleRate: number, channels: Float32Array[], loop: {start: number, end: number}|null}|null}
+ */
+export function readAiff(bytes) {
+  const view = new DataView(bytes);
+  if (view.byteLength < 12 || view.getUint32(0, false) !== 0x464f524d) return null; // "FORM"
+  const kind = view.getUint32(8, false);
+  if (kind !== 0x41494646 && kind !== 0x41494643) return null; // "AIFF", "AIFC"
+  let format = null, data = null, inst = null;
+  const markers = new Map();
+  for (let at = 12; at + 8 <= view.byteLength;) {
+    const id = view.getUint32(at, false);
+    const size = view.getUint32(at + 4, false);
+    const body = at + 8;
+    if (id === 0x434f4d4d) { // "COMM"
+      // the rate is an 80-bit extended float: sign and exponent, then a 64-bit mantissa
+      const exponent = (view.getUint16(body + 8, false) & 0x7fff) - 16383;
+      const mantissa = view.getUint32(body + 10, false) * 2 ** 32 + view.getUint32(body + 14, false);
+      format = {
+        channels: view.getInt16(body, false),
+        frames: view.getUint32(body + 2, false),
+        bits: view.getInt16(body + 6, false),
+        sampleRate: Math.round(mantissa * 2 ** (exponent - 63)),
+        compression: kind === 0x41494643 && size >= 22 ? view.getUint32(body + 18, false) : 0x4e4f4e45, // "NONE"
+      };
+    }
+    if (id === 0x53534e44) data = body + 8 + view.getUint32(body, false); // "SSND": offset, block size, then the frames
+    if (id === 0x4d41524b) { // "MARK"
+      let m = body + 2;
+      for (let k = 0; k < view.getUint16(body, false) && m + 7 <= body + size; k++) {
+        markers.set(view.getUint16(m, false), view.getUint32(m + 2, false));
+        const length = view.getUint8(m + 6);
+        m += 6 + 1 + length + ((length + 1) & 1);
+      }
+    }
+    if (id === 0x494e5354 && size >= 20) inst = { mode: view.getInt16(body + 8, false), begin: view.getUint16(body + 10, false), end: view.getUint16(body + 12, false) }; // "INST": its sustain loop
+    at = body + size + (size & 1);
+  }
+  if (!format || data === null) return null;
+  const { channels: count, frames: declared, bits, sampleRate, compression } = format;
+  const little = compression === 0x736f7774; // "sowt"
+  if (compression !== 0x4e4f4e45 && !little && compression !== 0x666c3332) return null; // "NONE", "sowt", "fl32"
+  const read = compression === 0x666c3332 ? (o) => view.getFloat32(o, false) : {
+    8: (o) => view.getInt8(o) / 128,
+    16: (o) => view.getInt16(o, little) / 32768,
+    24: little
+      ? (o) => (view.getUint8(o) | (view.getUint8(o + 1) << 8) | (view.getInt8(o + 2) << 16)) / 8388608
+      : (o) => ((view.getInt8(o) << 16) | (view.getUint8(o + 1) << 8) | view.getUint8(o + 2)) / 8388608,
+    32: (o) => view.getInt32(o, little) / 2147483648,
+  }[bits];
+  if (!read) return null;
+  const width = Math.ceil(bits / 8);
+  const frames = Math.min(declared, Math.floor((view.byteLength - data) / (width * count)));
+  const channels = Array.from({ length: count }, () => new Float32Array(frames));
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < count; c++) channels[c][i] = read(data + (i * count + c) * width);
+  }
+  let loop = null;
+  if (inst && inst.mode !== 0 && markers.has(inst.begin) && markers.has(inst.end)) {
+    loop = { start: markers.get(inst.begin), end: Math.min(frames - 1, markers.get(inst.end) - 1) };
+    if (loop.end <= loop.start) loop = null;
+  }
+  return { sampleRate, channels, loop };
+}

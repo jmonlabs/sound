@@ -468,3 +468,20 @@ test("a one-pole filter (lpf_1p) is gentle: -3 dB at its cutoff, -6 dB an octave
   assert.ok(Math.abs(gain(fc) + 3) < 0.3, `-3 dB at the cutoff (${gain(fc).toFixed(2)})`);
   assert.ok(Math.abs(gain(8 * fc) - gain(4 * fc) + 6) < 0.6, "6 dB an octave above it");
 });
+
+test("an AIFF recording is read like a WAV: 24-bit big-endian frames, its rate, its sustain loop", async () => {
+  const { readAiff } = await import("../src/sfz-parse.js");
+  const { readFileSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const dir = (await import("node:fs")).mkdtempSync("/tmp/aiff-");
+  // two frames, stereo: (0.5, -0.5), (0.25, -0.25), at 48 kHz, written by ffmpeg
+  const raw = new Float32Array([0.5, -0.5, 0.25, -0.25]);
+  (await import("node:fs")).writeFileSync(`${dir}/in.raw`, Buffer.from(raw.buffer));
+  execFileSync("ffmpeg", ["-v", "error", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", `${dir}/in.raw`, "-c:a", "pcm_s24be", `${dir}/out.aif`]);
+  const bytes = readFileSync(`${dir}/out.aif`);
+  const aiff = readAiff(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  assert.equal(aiff.sampleRate, 48000);
+  assert.equal(aiff.channels.length, 2);
+  assert.ok(Math.abs(aiff.channels[0][0] - 0.5) < 1e-6 && Math.abs(aiff.channels[1][1] + 0.25) < 1e-6);
+  assert.equal(readAiff(new ArrayBuffer(16)), null, "not an AIFF");
+});

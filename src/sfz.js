@@ -24,7 +24,7 @@
  * gain, volume, delay, offset and tune by controller).
  */
 
-import { parseSfz, readWav, sfzIncludes } from "./sfz-parse.js";
+import { parseSfz, readAiff, readWav, sfzIncludes } from "./sfz-parse.js";
 import { dspresetToSfz } from "./dspreset.js";
 
 /** Each recording, by URL, read once for every context: see `recording`. */
@@ -120,7 +120,8 @@ function samplePath(path) {
 }
 
 /**
- * A recording, fetched once: a WAV as its samples and loop (see readWav),
+ * A recording, fetched once: a WAV or an AIFF as its samples and loop (see
+ * readWav, readAiff),
  * anything else (FLAC, Ogg) as bytes for the browser to decode.
  */
 function recording(url) {
@@ -128,7 +129,7 @@ function recording(url) {
     recordings.set(url, fetch(url).then(async (response) => {
       if (!response.ok) throw new Error(`Could not load the recording ${url} (${response.status})`);
       const bytes = await response.arrayBuffer();
-      const wav = readWav(bytes);
+      const wav = readWav(bytes) ?? readAiff(bytes);
       if (!wav) return { bytes, loop: null };
       if (wav.loop) crossfadeLoop(wav, LOOP_CROSSFADE);
       return wav;
