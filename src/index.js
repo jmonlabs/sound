@@ -135,6 +135,8 @@ export function readSpec(spec) {
         sfz: spec.sfz ?? spec.dspreset,
         ...(spec.group !== undefined ? { group: spec.group } : {}),
         ...(spec.tuning !== undefined ? { tuning: spec.tuning } : {}),
+        ...(spec.gain !== undefined ? { gain: spec.gain } : {}),
+        ...(spec.avoid !== undefined ? { avoid: spec.avoid } : {}),
         ...(spec.ampVeltrack !== undefined ? { ampVeltrack: spec.ampVeltrack } : {}),
         ...(spec.monophonic ? { monophonic: spec.monophonic } : {}),
         staccato: spec.staccato,

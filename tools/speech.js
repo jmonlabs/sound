@@ -11,12 +11,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { dspresetToSfz } from "../src/dspreset.js";
 import { parseSfz } from "../src/sfz-parse.js";
+import { avoidRecordings } from "../src/sfz.js";
 import { decode, heardAt, RATE } from "./measure.js";
 
 /** When each key of one SFZ or preset is heard: { MIDI key: seconds }. */
-export function speechTable(file) {
+export function speechTable(file, { avoid = [] } = {}) {
   const text = readFileSync(file, "utf8");
-  const { regions } = parseSfz(/\.dspreset$/i.test(file) ? dspresetToSfz(text) : text, { include: (path) => readFileSync(join(dirname(file), path), "utf8") });
+  const { regions: parsed } = parseSfz(/\.dspreset$/i.test(file) ? dspresetToSfz(text) : text, { include: (path) => readFileSync(join(dirname(file), path), "utf8") });
+  const regions = avoidRecordings(parsed, avoid);
   const plain = regions.filter((r) => ["attack", "first"].includes(r.trigger ?? "attack") && r.sw_previous === undefined && r.sample);
   const top = Math.max(0, ...plain.map((r) => r.hivel ?? 127));
   const measured = new Map();

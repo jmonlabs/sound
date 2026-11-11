@@ -426,3 +426,17 @@ test("one line: a note ends the one before it, but notes that start together (a 
   free.triggerAttack(62, 2, 1, 4);
   assert.equal(free.voices[0].releasedAt, Infinity, "without it, an instrument stays polyphonic");
 });
+
+test("a muffled recording is avoided: its keys go to the nearest recording of the same kind", async () => {
+  const { avoidRecordings } = await import("../src/sfz.js");
+  const regions = [
+    { sample: "C.wav", lokey: 60, hikey: 61, pitch_keycenter: 60 },
+    { sample: "D.wav", lokey: 62, hikey: 63, pitch_keycenter: 62 },
+    { sample: "E.wav", lokey: 64, hikey: 65, pitch_keycenter: 64 },
+    { sample: "legato_C_D.wav", lokey: 62, hikey: 62, pitch_keycenter: 62, trigger: "legato", sw_previous: 60 },
+  ];
+  const kept = avoidRecordings(regions.map((r) => ({ ...r })), ["D.wav"]);
+  assert.deepEqual(kept.map((r) => r.sample), ["C.wav", "E.wav", "legato_C_D.wav"]);
+  assert.deepEqual([kept[0].lokey, kept[0].hikey], [60, 63], "the nearest (C, then E by order) takes D's keys");
+  assert.deepEqual(avoidRecordings(regions, []), regions);
+});

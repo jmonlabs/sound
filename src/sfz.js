@@ -56,7 +56,31 @@ const RELEASE_FLOOR = 0.001;
  * @returns {Promise<{url: string, control: Object, regions: Array<Object>}>}
  *   each region's `sample` resolved to a URL
  */
-export async function loadSfzFile(url, { group, tuning } = {}) {
+/**
+ * Regions without the recordings to avoid (a recording much duller than its
+ * neighbours, say): the keys they played go to the nearest remaining region
+ * of the same kind (same trigger, same velocity layer, not a legato
+ * transition), which stretches its key range to cover them.
+ *
+ * @param {Array<Object>} regions
+ * @param {Array<string>} avoid - recording paths, as the file writes them
+ */
+export function avoidRecordings(regions, avoid = []) {
+  if (!avoid?.length) return regions;
+  const out = regions.filter((r) => !avoid.includes(r.sample));
+  const kind = (r) => `${r.trigger ?? "attack"}|${r.lovel ?? 1}|${r.hivel ?? 127}|${r.sw_previous ?? ""}|${r.seq_position ?? ""}|${r.lorand ?? ""}`;
+  for (const gone of regions.filter((r) => avoid.includes(r.sample) && r.sw_previous === undefined)) {
+    const same = out.filter((r) => kind(r) === kind(gone) && r.sw_previous === undefined);
+    if (!same.length) continue;
+    const centre = gone.pitch_keycenter ?? 60;
+    const nearest = same.reduce((a, b) => (Math.abs((b.pitch_keycenter ?? 60) - centre) < Math.abs((a.pitch_keycenter ?? 60) - centre) ? b : a));
+    nearest.lokey = Math.min(nearest.lokey ?? 0, gone.lokey ?? 0);
+    nearest.hikey = Math.max(nearest.hikey ?? 127, gone.hikey ?? 127);
+  }
+  return out;
+}
+
+export async function loadSfzFile(url, { group, tuning, gain, avoid } = {}) {
   const absolute = new URL(url, globalThis.location?.href ?? "file:///").href;
   const texts = {};
   const fetchText = async (fileUrl) => {
@@ -73,11 +97,16 @@ export async function loadSfzFile(url, { group, tuning } = {}) {
     texts[path] = await fetchText(new URL(samplePath(path), absolute).href);
     pending.push(...sfzIncludes(texts[path]));
   }
-  const { control, regions } = parseSfz(main, { include: (path) => texts[path] });
-  // A table of corrections, recording → cents (see tools/tuning.js): a URL, or the table.
-  const corrections = typeof tuning === "string" ? await (await fetch(new URL(tuning, globalThis.location?.href ?? "file:///").href)).json() : (tuning ?? {});
+  const parsed = parseSfz(main, { include: (path) => texts[path] });
+  const control = parsed.control;
+  const regions = avoidRecordings(parsed.regions, avoid);
+  // Tables by recording (see tools/calibrate.js), a URL or the table: cents to tune it, dB to level it.
+  const table = async (value) => (typeof value === "string" ? (await fetch(new URL(value, globalThis.location?.href ?? "file:///").href)).json() : (value ?? {}));
+  const corrections = await table(tuning);
+  const gains = await table(gain);
   for (const region of regions) {
     if (region.sample && corrections[region.sample]) region.tune = (region.tune ?? 0) + corrections[region.sample];
+    if (region.sample && gains[region.sample]) region.volume = (region.volume ?? 0) + gains[region.sample];
     if (region.sample) region.sample = new URL(samplePath(region.sample), absolute).href;
   }
   return { url: absolute, control, regions: regions.filter((r) => r.sample && !r.sample.startsWith("*")) };
@@ -475,7 +504,7 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, group, tuning, ampVeltrack, monophonic = null, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
+  constructor(Tone, { sfz, group, tuning, gain, avoid, ampVeltrack, monophonic = null, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -495,7 +524,7 @@ class SfzInstrument {
     // The piece's controller moves, as they arrive: number → [{ time, value 0..127 }].
     this.moves = new Map();
 
-    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group, tuning }) : null)))
+    this.loaded = Promise.all([sfz, staccato].map((url) => (url ? loadSfzFile(url, { group, tuning, gain, avoid }) : null)))
       .then(async (files) => {
         // Given the track's notes, only the regions they can play are kept, and only their recordings load.
         // `ampVeltrack` (percent): how much the velocity sets the level, over what the file says. A

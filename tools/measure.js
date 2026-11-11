@@ -1,6 +1,7 @@
 // Measures of a recording, shared by tools/tuning.js and tools/inspect.js: its pitch over time, how
 // clearly it has one, and how long it takes to speak.
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { cpus } from "node:os";
 
 export const RATE = 44100;
 
@@ -123,4 +124,33 @@ export function heardAt(x, offset = 0) {
   if (!(peak > 0)) return null;
   const at = env.findIndex((v) => v >= peak * 10 ** (-10 / 20));
   return +((at * W) / RATE).toFixed(3);
+}
+
+/** A sound as a note of a piece plays it (from 0.2 s to 2 s): its level (dB) and the share of it above 3 kHz (dB). */
+export function colourOf(x) {
+  const a = Math.min(Math.floor(0.2 * RATE), Math.floor(x.length / 3)), b = Math.min(x.length, Math.floor(2 * RATE));
+  let e = 0, hi = 0, lp = 0;
+  for (let j = a; j < b; j++) { e += x[j] * x[j]; lp += (x[j] - lp) * (1 - Math.exp((-2 * Math.PI * 3000) / RATE)); hi += (x[j] - lp) ** 2; }
+  if (!(e > 0)) return null;
+  return { level: 10 * Math.log10(e / (b - a)), bright: 10 * Math.log10(hi / e) };
+}
+
+/** decode(), without waiting: several recordings decode at once. */
+export function decodeLater(file) {
+  return new Promise((done, fail) => {
+    execFile("ffmpeg", ["-v", "error", "-i", file, "-ac", "1", "-ar", String(RATE), "-f", "f32le", "-"], { encoding: "buffer", maxBuffer: 1 << 30 }, (error, bytes) => {
+      if (error) fail(error);
+      else done(new Float32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4));
+    });
+  });
+}
+
+/** Run `work` on every item, as many at once as the machine has cores. */
+export async function eachAtOnce(items, work, width = Math.max(2, cpus().length)) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length) { const i = next++; results[i] = await work(items[i], i); }
+  }));
+  return results;
 }
