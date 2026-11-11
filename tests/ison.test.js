@@ -336,3 +336,11 @@ test("a velocity-following control within its range", () => {
   node.triggerAttack([62], 2, 0.5, 1);
   assert.deepEqual(node.nodes[0].attacks.map((c) => +c[1].toFixed(3)), [0.3, 1, 0.65]);
 });
+
+test("an instrument with its own recorded attack does not fade in a bow shape from silence: the note stays on its beat", () => {
+  const bowed = { format: "ison", version: "1.0", name: "B", sources: { s: { type: "Synth" } }, modes: { sustain: { source: "s", speech: 0.05 } } };
+  const shape = [{ time: 0, value: 0 }, { time: 0.12, value: 0.85 }, { time: 1, value: 1 }, { time: 2, value: 0.8 }];
+  const [note] = sound.performIson(bowed, [{ pitch: 62, time: 2, duration: 2, velocity: 0.5, dynamics: shape }], { tempo: 60 });
+  assert.equal(note.dynamics[0].value, 0.85, "starts where the drawn attack would have arrived");
+  assert.deepEqual(note.dynamics.slice(1), shape.slice(1), "the swell and the end are kept");
+});

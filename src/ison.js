@@ -159,8 +159,14 @@ export function early(note, mode, tempo) {
   if (!(seconds > 0)) return note;
   const beats = Math.min((seconds * tempo) / 60, note.time);
   if (!(beats > 0)) return note;
-  // A loudness curve (a bow's shape) starts with the note, where the bow does.
-  return { ...note, time: note.time - beats, duration: note.duration + beats };
+  // A loudness curve that starts from silence (a bow's shape drawn for an instrument without an
+  // attack of its own) would fade in on top of the attack the recording already has, and make the
+  // note late again by a different amount on every note: the recorded attack takes the place of
+  // that fade, and the rest of the curve (its swell, its end) is kept.
+  const curve = Array.isArray(note.dynamics) && note.dynamics.length > 1 && note.dynamics[0].value < note.dynamics[1].value
+    ? [{ ...note.dynamics[0], value: note.dynamics[1].value }, ...note.dynamics.slice(1)]
+    : note.dynamics;
+  return { ...note, time: note.time - beats, duration: note.duration + beats, ...(curve ? { dynamics: curve } : {}) };
 }
 
 /** One note per layer of its mode (see performIson). */
