@@ -457,7 +457,16 @@ function filterPlan(region, key, velocity) {
     frequency: Math.min(20000, region.cutoff * 2 ** (cents / 1200)),
     // resonance is in dB; a biquad's Q is a ratio.
     Q: 10 ** ((region.resonance ?? 0) / 20) * Math.SQRT1_2,
+    // `lpf_1p`, `hpf_1p`: one pole, 6 dB an octave, much gentler than a biquad's 12. Played as such
+    // when no controller moves the cutoff (a one-pole filter's cutoff cannot be automated).
+    onePole: /^[lh]pf_1p$/.test(region.fil_type ?? "") && !Object.keys(region).some((k) => /^cutoff_(?:on)?cc\d+$/.test(k)),
   };
+}
+
+/** A one-pole filter's coefficients (feedforward, feedback) at `frequency`, for an IIRFilterNode. */
+export function onePole(type, frequency, sampleRate) {
+  const a = Math.exp((-2 * Math.PI * Math.min(frequency, sampleRate / 2.2)) / sampleRate);
+  return type === "highpass" ? { feedforward: [(1 + a) / 2, -(1 + a) / 2], feedback: [1, -a] } : { feedforward: [1 - a], feedback: [1, -a] };
 }
 
 /**
@@ -801,7 +810,10 @@ class SfzInstrument {
     const chain = [source];
     const control = controlPlan(region, controllers);
     let cutoff = null;
-    if (plan.filter) {
+    if (plan.filter?.onePole && typeof ctx.createIIRFilter === "function") {
+      const { feedforward, feedback } = onePole(plan.filter.type, plan.filter.frequency * 2 ** (control.cutoffCents / 1200), ctx.sampleRate);
+      chain.push(ctx.createIIRFilter(feedforward, feedback));
+    } else if (plan.filter) {
       const filter = ctx.createBiquadFilter();
       filter.type = plan.filter.type;
       filter.frequency.value = plan.filter.frequency;

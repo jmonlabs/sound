@@ -458,3 +458,13 @@ test("an avoided recording's keys stay in its group, when two groups play the sa
     assert.deepEqual([c.lokey, c.hikey], [60, 63], `group ${group} still plays D's keys`);
   }
 });
+
+test("a one-pole filter (lpf_1p) is gentle: -3 dB at its cutoff, -6 dB an octave further each octave", async () => {
+  const { onePole } = await import("../src/sfz.js");
+  const sr = 44100, fc = 1000;
+  const { feedforward: [b], feedback: [, m] } = onePole("lowpass", fc, sr);
+  const gain = (f) => { const w = (2 * Math.PI * f) / sr; return 20 * Math.log10(b / Math.hypot(1 + m * Math.cos(w), -m * Math.sin(w))); };
+  assert.ok(Math.abs(gain(10)) < 0.1, "passes the lows");
+  assert.ok(Math.abs(gain(fc) + 3) < 0.3, `-3 dB at the cutoff (${gain(fc).toFixed(2)})`);
+  assert.ok(Math.abs(gain(8 * fc) - gain(4 * fc) + 6) < 0.6, "6 dB an octave above it");
+});
