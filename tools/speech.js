@@ -13,26 +13,36 @@ import { dspresetToSfz } from "../src/dspreset.js";
 import { parseSfz } from "../src/sfz-parse.js";
 import { decode, heardAt, RATE } from "./measure.js";
 
-const [file, out] = process.argv.slice(2);
-if (!file) { console.error('usage : node tools/speech.js "<instrument.sfz | preset.dspreset>" [out.json]'); process.exit(1); }
-const text = readFileSync(file, "utf8");
-const { regions } = parseSfz(/\.dspreset$/i.test(file) ? dspresetToSfz(text) : text, { include: (path) => readFileSync(join(dirname(file), path), "utf8") });
-const plain = regions.filter((r) => ["attack", "first"].includes(r.trigger ?? "attack") && r.sw_previous === undefined && r.sample);
-const top = Math.max(0, ...plain.map((r) => r.hivel ?? 127));
-const measured = new Map();
-const table = {};
-for (const r of plain.filter((r) => (r.hivel ?? 127) === top)) {
-  const key = `${r.sample}|${r.offset ?? 0}`;
-  if (!measured.has(key)) {
-    let at = null;
-    try { at = heardAt(decode(join(dirname(file), r.sample)), Math.round(((r.offset ?? 0) * RATE) / 44100)); } catch { at = null; }
-    measured.set(key, at);
+/** When each key of one SFZ or preset is heard: { MIDI key: seconds }. */
+export function speechTable(file) {
+  const text = readFileSync(file, "utf8");
+  const { regions } = parseSfz(/\.dspreset$/i.test(file) ? dspresetToSfz(text) : text, { include: (path) => readFileSync(join(dirname(file), path), "utf8") });
+  const plain = regions.filter((r) => ["attack", "first"].includes(r.trigger ?? "attack") && r.sw_previous === undefined && r.sample);
+  const top = Math.max(0, ...plain.map((r) => r.hivel ?? 127));
+  const measured = new Map();
+  const table = {};
+  for (const r of plain.filter((r) => (r.hivel ?? 127) === top)) {
+    const key = `${r.sample}|${r.offset ?? 0}`;
+    if (!measured.has(key)) {
+      let at = null;
+      try { at = heardAt(decode(join(dirname(file), r.sample)), Math.round(((r.offset ?? 0) * RATE) / 44100)); } catch { at = null; }
+      measured.set(key, at);
+    }
+    const at = measured.get(key);
+    if (at === null) continue;
+    for (let k = r.lokey ?? 0; k <= Math.min(127, r.hikey ?? 127); k++) table[k] = Math.max(table[k] ?? 0, at);
   }
-  const at = measured.get(key);
-  if (at === null) continue;
-  for (let k = r.lokey ?? 0; k <= Math.min(127, r.hikey ?? 127); k++) table[k] = Math.max(table[k] ?? 0, at);
+  return table;
 }
-const destination = out ?? file.replace(/\.(sfz|dspreset)$/i, ".speech.json");
-writeFileSync(destination, JSON.stringify(table, null, 1) + "\n");
-const values = Object.values(table);
-console.log(`${values.length} keys, heard after ${Math.min(...values)}–${Math.max(...values)} s → ${destination}`);
+
+const main = () => {
+  const [file, out] = process.argv.slice(2);
+  if (!file) { console.error('usage : node tools/speech.js "<instrument.sfz | preset.dspreset>" [out.json]'); process.exit(1); }
+  const table = speechTable(file);
+  const destination = out ?? file.replace(/\.(sfz|dspreset)$/i, ".speech.json");
+  writeFileSync(destination, JSON.stringify(table, null, 1) + "\n");
+  const values = Object.values(table);
+  console.log(`${values.length} keys, heard after ${Math.min(...values)}–${Math.max(...values)} s → ${destination}`);
+};
+
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) main();

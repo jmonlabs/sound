@@ -18,9 +18,8 @@ import { dspresetToSfz } from "../src/dspreset.js";
 import { parseSfz } from "../src/sfz-parse.js";
 import { decode, medianPitch } from "./measure.js";
 
-const main = () => {
-  const [file, out] = process.argv.slice(2);
-  if (!file) { console.error('usage : node tools/tuning.js "<instrument.sfz | preset.dspreset>" [out.json]'); process.exit(1); }
+/** The corrections of one SFZ or preset: { recording: cents }, and what was measured. */
+export function tuningTable(file) {
   const text = readFileSync(file, "utf8");
   const sfz = /\.dspreset$/i.test(file) ? dspresetToSfz(text) : text;
   const { regions } = parseSfz(sfz, { include: (path) => readFileSync(join(dirname(file), path), "utf8") });
@@ -42,6 +41,13 @@ const main = () => {
     if (Math.abs(correction) > 30) { doubtful.push(`${region.sample} ${correction}`); continue; }
     if (Math.abs(correction) >= 3) table[region.sample] = correction;
   }
+  return { table, measured, unclear, doubtful };
+}
+
+const main = () => {
+  const [file, out] = process.argv.slice(2);
+  if (!file) { console.error('usage : node tools/tuning.js "<instrument.sfz | preset.dspreset>" [out.json]'); process.exit(1); }
+  const { table, measured, unclear, doubtful } = tuningTable(file);
   const destination = out ?? file.replace(/\.(sfz|dspreset)$/i, ".tuning.json");
   writeFileSync(destination, JSON.stringify(table, null, 1) + "\n");
   console.log(`${measured} recordings measured, ${unclear} without a clear pitch, ${Object.keys(table).length} corrected → ${destination}`);

@@ -342,7 +342,15 @@ node tools/sfz-index.js /Volumes/instruments/jmon/sfz            # index.json, f
 node tools/inspect.js "…/Violin.dspreset"                         # what it holds, in one line
 node tools/inspect.js --index /Volumes/instruments/jmon/sfz pianobook   # inspect.json, shown in the explorer
 node tools/tuning.js "…/Violin.dspreset" violin.tuning.json       # a correction per recording
+node tools/calibrate.js "…/violin.ison.json"                        # both, written into an ison
 ```
+
+`calibrate.js` is the one to use for an ison: for every source played from
+samples it writes the tuning corrections (`tuning.json`, named by the source)
+and, for every mode, how long each key takes to be heard (`speech`), so each
+note starts that much earlier and sounds on its beat. The delay is measured
+key by key: it changes from one recording to the next, and a single delay for
+the whole instrument would leave some notes late and others early.
 
 `inspect.js` reads the layout from the file (keys, velocity layers and forces
 faded by a controller, takes, legato, release sounds, key switches, loops) and
