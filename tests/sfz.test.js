@@ -371,7 +371,8 @@ test("a sounding note follows the mod wheel, whether the moves come before the n
 
 test("a level and a peak filter follow the mod wheel, the filter on the file's own curve", () => {
   const { regions } = parseSfz(`<curve> curve_index=7 v000=0 v064=0.9 v127=1
-<region> sample=a.flac amplitude=25 amplitude_oncc1=75 eq1_freq=4000 eq1_bw=2.5 eq1_gain=-36 eq1_gain_oncc1=36 eq1_gain_curvecc1=7`);
+<curve> curve_index=8 v000=0.25 v127=1
+<region> sample=a.flac amplitude_oncc1=100 amplitude_curvecc1=8 eq1_freq=4000 eq1_bw=2.5 eq1_gain=-36 eq1_gain_oncc1=36 eq1_gain_curvecc1=7`);
   const [r] = regions;
   const down = controlPlan(r, { 1: 0 }), half = controlPlan(r, { 1: 64 }), up = controlPlan(r, { 1: 127 });
   assert.equal(down.gain, 0.25, "the wheel down: a quarter of the level");
@@ -381,6 +382,10 @@ test("a level and a peak filter follow the mod wheel, the filter on the file's o
   assert.equal(up.eqGains[0], 0);
   const plan = voicePlan(r, { key: 60, velocity: 100, weight: 1, controllers: { 1: 0 }, random: () => 0.5 });
   assert.equal(plan.gain, 10 ** (40 * Math.log10(100 / 127) / 20), "the level the wheel gives is the control gain's, not counted twice");
+  // Salamander's volume knob: amplitude_oncc7=100 on curve 4 (x²), the knob at 100 of 127
+  const piano = { amplitude_oncc7: 100, amplitude_curvecc7: 4 };
+  assert.ok(Math.abs(controlPlan(piano, { 7: 100 }).gain - (100 / 127) ** 2) < 1e-9, "the controller multiplies the level, on its curve");
+  assert.equal(controlPlan(piano, { 7: 127 }).gain, 1);
   assert.ok(plan.eq[0].moves, "a band the wheel moves is kept even at 0 dB");
 });
 

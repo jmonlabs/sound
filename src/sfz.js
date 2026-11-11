@@ -317,9 +317,9 @@ export function controlPlan(region, controllers) {
       region[`xfout_locc${n}`], region[`xfout_hicc${n}`], region.xf_cccurve);
   }
   const decibels = byControllers(region, ["gain", "volume"], controllers);
-  // `amplitude_ccN` adds to the amplitude (percent) as the controller turns:
-  // a level that follows a knob without reaching silence.
-  const amplitude = hasAmplitudeControl(region) ? Math.max(0, (region.amplitude ?? 100) + byControllers(region, ["amplitude"], controllers)) / 100 : 1;
+  // `amplitude_onccN` (percent) scales the level by the controller, on its
+  // curve (`amplitude_curveccN`): a volume knob, as Salamander's CC7 is.
+  const amplitude = amplitudeByControllers(region, controllers);
   return {
     gain: share * amplitude * 10 ** (decibels / 20),
     cutoffCents: byControllers(region, ["cutoff"], controllers),
@@ -327,9 +327,33 @@ export function controlPlan(region, controllers) {
   };
 }
 
-/** Whether a controller moves the region's amplitude (then controlPlan applies it, not voicePlan). */
-function hasAmplitudeControl(region) {
-  return Object.keys(region).some((opcode) => /^amplitude_(?:on)?cc\d+$/.test(opcode));
+/**
+ * The SFZ built-in curves (`*_curveccN=0…6`), 0 to 1 for a controller at 0 to 1:
+ * linear, bipolar, inverted, inverted bipolar, x², √x, √(1−x). A file's own
+ * curve (`<curve>`) is a list of 128 values.
+ */
+function onCurve(curve, position) {
+  if (Array.isArray(curve)) return curve[Math.max(0, Math.min(127, Math.round(position * 127)))];
+  switch (curve) {
+    case 1: return position * 2 - 1;
+    case 2: return 1 - position;
+    case 3: return 1 - position * 2;
+    case 4: return position * position;
+    case 5: return Math.sqrt(position);
+    case 6: return Math.sqrt(1 - position);
+    default: return position;
+  }
+}
+
+/** The level the controllers give a region (`amplitude_onccN`: percent, times its curve), each multiplying. */
+export function amplitudeByControllers(region, controllers) {
+  let factor = 1;
+  for (const [opcode, amount] of Object.entries(region)) {
+    const match = /^amplitude_(?:on)?cc(\d+)$/.exec(opcode);
+    if (!match || typeof amount !== "number") continue;
+    factor *= Math.max(0, (amount / 100) * onCurve(region[`amplitude_curvecc${match[1]}`], (controllers[match[1]] ?? 0) / 127));
+  }
+  return factor;
 }
 
 /** Whether a controller moves this EQ band's gain. */
@@ -368,7 +392,7 @@ export function voicePlan(region, { key, velocity, weight, controllers, random, 
   // The controllers' part of the gain is the voice's control gain (see
   // controlPlan), which follows them while the note sounds.
   const decibels = (region.volume ?? 0) + (region.gain ?? 0) + volume + velocityDb + spread("amp_random");
-  const amplitude = hasAmplitudeControl(region) ? 1 : (region.amplitude ?? 100) / 100;
+  const amplitude = (region.amplitude ?? 100) / 100;
 
   const seconds = (value) => Math.max(0, value);
   return {

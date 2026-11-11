@@ -105,7 +105,8 @@ test("a preset whose forces are made by the mod wheel: level, filter and attack 
   assert.equal(control.set_cc11, 127);
   assert.equal(r.volume, undefined, "a bare volume is a factor: 1.0 is 0 dB");
   assert.equal(r.amp_veltrack, 0, "what <groups> says, every group inherits");
-  assert.deepEqual([r.amplitude, r.amplitude_oncc1], [25.1, 74.9], "the tag's level, from a quarter to full");
+  assert.equal(r.amplitude_oncc1, 100, "the tag's level follows the wheel…");
+  assert.ok(Array.isArray(r.amplitude_curvecc1) && Math.abs(r.amplitude_curvecc1[0] - 0.251) < 1e-3 && r.amplitude_curvecc1[127] === 1, "…from a quarter to full, on the table's curve");
   assert.equal(r.ampeg_attack, 0.1, "the attack knob (0) plus the wheel's lowest addition");
   assert.equal(r.ampeg_attack_oncc1, -0.1, "the wheel up, no attack at all");
   assert.equal(r.ampeg_release, 0.65);

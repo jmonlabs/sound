@@ -10,8 +10,8 @@
  * - a knob a MIDI controller turns (`<midi><cc>`) becomes that controller,
  *   starting where the knob starts (`set_ccN`). What it does is written on the
  *   recordings it touches: a volume table that rises from or falls to silence
- *   becomes a crossfade (`xfin_loccN`…), any other volume a gain that follows
- *   the knob (`amplitude_onccN`), an attack it lengthens or shortens
+ *   becomes a crossfade (`xfin_loccN`…), any other volume a level that follows
+ *   the knob on the table's own curve (`amplitude_onccN`, `amplitude_curveccN`), an attack it lengthens or shortens
  *   (`ampeg_attack_onccN`), the gain of a group's peak filter (`eqK_gain_onccN`,
  *   on a curve, since the preset turns it as a plain factor). A knob may act
  *   on a group, or on every recording that carries a tag;
@@ -118,8 +118,12 @@ function lineOf(control, binding) {
   return [[0, low], [1, high]];
 }
 
-/** A volume line as SFZ: a crossfade where it reaches silence, a gain that follows the controller otherwise. */
-function volumeOpcodes(line, cc) {
+/**
+ * A volume line as SFZ: a crossfade where it reaches silence, otherwise a
+ * level that follows the controller (`amplitude_onccN`, scaled by a curve of
+ * the line's own values, `addCurve` giving its index).
+ */
+function volumeOpcodes(line, cc, addCurve) {
   const at = (x) => Math.round(Math.max(0, Math.min(1, x)) * 127);
   if (line.some(([, y]) => y <= 0.001)) {
     const out = [];
@@ -130,11 +134,17 @@ function volumeOpcodes(line, cc) {
     }
     return out.length ? [...out, "xf_cccurve=gain"] : [];
   }
-  if (line.length !== 2) return [];
-  const [[x0, y0], [x1, y1]] = line;
-  const slope = (y1 - y0) / (x1 - x0 || 1);
-  const start = y0 - slope * x0;
-  return [`amplitude=${round(start * 100)}`, `amplitude_oncc${cc}=${round(slope * 100)}`];
+  if (line.length < 2) return [];
+  const valueAt = (x) => {
+    const k = line.findIndex(([px]) => px >= x);
+    if (k === -1) return line[line.length - 1][1];
+    if (k === 0) return line[0][1];
+    const [x0, y0] = line[k - 1], [x1, y1] = line[k];
+    return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0 || 1);
+  };
+  const top = Math.max(...line.map(([, y]) => y));
+  const index = addCurve(Array.from({ length: 128 }, (_, v) => round(Math.max(0, valueAt(v / 127)) / top)));
+  return [`amplitude_oncc${cc}=${round(top * 100)}`, `amplitude_curvecc${cc}=${index}`];
 }
 
 /**
@@ -183,7 +193,12 @@ function interfaceOf(text, groupCount) {
       }
       const cc = knob.cc;
       if (b.type === "amp" && b.parameter === "AMP_VOLUME") {
-        for (const t of targets) t.push(...volumeOpcodes(lineOf(knob, b), cc));
+        const addCurve = (points) => {
+          const index = 7 + curves.length;
+          curves.push(`<curve> curve_index=${index} ${points.map((p, v) => `v${String(v).padStart(3, "0")}=${p}`).join(" ")}`);
+          return index;
+        };
+        for (const t of targets) t.push(...volumeOpcodes(lineOf(knob, b), cc, addCurve));
       } else if (b.type === "amp" && (key === "attack" || key === "release") && b.translation === "linear") {
         const [[, low], [, high]] = lineOf(knob, b);
         // Added to the envelope the group has otherwise ("modBehavior add"):
