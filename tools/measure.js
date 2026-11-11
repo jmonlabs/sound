@@ -119,7 +119,8 @@ export function heardAt(x, offset = 0) {
     for (let j = i; j < i + W; j++) e += x[j] * x[j];
     env.push(Math.sqrt(e / W));
   }
-  // The peak of the attack (the first 0.6 s), not of a swell that comes later in a held note.
+  // The peak of the attack (the first 0.6 s), not of a swell that comes later in a held note. A note
+  // that swells for longer (a slow bow) has no clear moment it is heard: no table makes it punctual.
   const peak = Math.max(...env.slice(0, Math.ceil((0.6 * RATE) / W)));
   if (!(peak > 0)) return null;
   const at = env.findIndex((v) => v >= peak * 10 ** (-10 / 20));
