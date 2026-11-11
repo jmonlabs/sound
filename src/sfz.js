@@ -455,6 +455,8 @@ function seededRandom(seed) {
  * @param {string} [spec.staccato] - an SFZ file for short notes
  * @param {number} [spec.staccatoUnder=0.3] - seconds: notes shorter than
  *   this play the staccato file
+ * @param {{fade?: number, together?: number}} [spec.monophonic] - one line:
+ *   a note ends the notes started before it (see endLine)
  * @param {number} [spec.ampVeltrack] - percent, how much the velocity sets
  *   the level, over the file's own `amp_veltrack`
  * @param {string|Object} [spec.tuning] - corrections in cents by recording
@@ -473,7 +475,7 @@ export function createSfzInstrument(Tone, spec) {
 }
 
 class SfzInstrument {
-  constructor(Tone, { sfz, group, tuning, ampVeltrack, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
+  constructor(Tone, { sfz, group, tuning, ampVeltrack, monophonic = null, staccato = null, staccatoUnder = STACCATO_UNDER, envelope = {}, volume = 0, controllers = {}, notes = null, start = 0 }) {
     this.Tone = Tone;
     this.context = Tone.getContext();
     this.isSfz = true;
@@ -489,6 +491,7 @@ class SfzInstrument {
     this.files = null;
     this.disposed = false;
     this.startingControllers = controllers;
+    this.monophonic = monophonic;
     // The piece's controller moves, as they arrive: number → [{ time, value 0..127 }].
     this.moves = new Map();
 
@@ -595,6 +598,7 @@ class SfzInstrument {
   triggerAttack(notes, time, velocity = 1, seconds = Infinity, options = {}) {
     if (!this.files) return this;
     const at = this.timeOf(time);
+    this.endLine(at);
     const own = {};
     for (const [number, value] of Object.entries(options?.controllers ?? {})) own[number] = Math.max(0, Math.min(1, value)) * 127;
     const short = this.files.staccato && seconds < this.staccatoUnder;
@@ -836,6 +840,23 @@ class SfzInstrument {
       this.crossfaded.set(key, copy);
     }
     return this.crossfaded.get(key);
+  }
+
+  /**
+   * One line, as a bowed string plays it (`monophonic: { fade, together }`):
+   * a note that starts ends the notes sounding before it, in `fade` seconds,
+   * so two pitches and two vibratos never ring on through each other at every
+   * change of note. Notes that started within `together` seconds of this one
+   * are a double stop, or a line doubled: they keep sounding.
+   */
+  endLine(at) {
+    if (!this.monophonic) return;
+    const fade = this.monophonic.fade ?? 0.06;
+    const together = this.monophonic.together ?? 0.08;
+    for (const voice of this.voices) {
+      if (voice.trigger === "release" || voice.start >= at - together || voice.releasedAt <= at) continue;
+      this.releaseVoice(voice, at, Math.min(fade, voice.plan.envelope.release));
+    }
   }
 
   /**

@@ -136,6 +136,7 @@ export function readSpec(spec) {
         ...(spec.group !== undefined ? { group: spec.group } : {}),
         ...(spec.tuning !== undefined ? { tuning: spec.tuning } : {}),
         ...(spec.ampVeltrack !== undefined ? { ampVeltrack: spec.ampVeltrack } : {}),
+        ...(spec.monophonic ? { monophonic: spec.monophonic } : {}),
         staccato: spec.staccato,
         staccatoUnder: spec.staccatoUnder,
         envelope: spec.envelope,

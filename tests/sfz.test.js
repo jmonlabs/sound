@@ -406,3 +406,23 @@ test("a tuning table corrects each recording by its own cents, a URL or the tabl
   const byTable = await loadSfzFile("https://x/violin.sfz", { tuning: { "Samples/E4.flac": 8 } });
   assert.deepEqual(byTable.regions.map((r) => r.tune ?? 0), [5, 8]);
 });
+
+test("one line: a note ends the one before it, but notes that start together (a double stop) keep sounding", async () => {
+  serve({ "violin.sfz": "<region> sample=long.wav pitch_keycenter=60 ampeg_release=0.65", "long.wav": "" });
+  const context = fakeContext();
+  const { node } = sound.create({ sfz: "https://x/violin.sfz", monophonic: { fade: 0.06, together: 0.08 } }, fakeTone(context));
+  await node.loaded;
+  node.triggerAttack(60, 1, 1, 4);
+  node.triggerAttack(64, 1.03, 1, 4); // a double stop, 30 ms apart
+  node.triggerAttack(62, 2, 1, 4); // the next note of the line
+  const [first, second, third] = node.voices;
+  assert.equal(first.releasedAt, 2, "the line's previous notes end where the next one starts");
+  assert.equal(second.releasedAt, 2);
+  assert.ok(Math.abs(first.endsAt - 2.06) < 1e-9, "in 60 ms, not the 0.65 s release");
+  assert.equal(third.releasedAt, Infinity);
+  const { node: free } = sound.create({ sfz: "https://x/violin.sfz" }, fakeTone(fakeContext()));
+  await free.loaded;
+  free.triggerAttack(60, 1, 1, 4);
+  free.triggerAttack(62, 2, 1, 4);
+  assert.equal(free.voices[0].releasedAt, Infinity, "without it, an instrument stays polyphonic");
+});
