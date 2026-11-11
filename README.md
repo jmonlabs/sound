@@ -352,6 +352,13 @@ note starts that much earlier and sounds on its beat. The delay is measured
 key by key: it changes from one recording to the next, and a single delay for
 the whole instrument would leave some notes late and others early.
 
+Each recording is measured as the file plays it: from its `offset`, after its
+`ampeg_delay` and through its `ampeg_attack` (a fade-in the file gives some
+notes), with the `tune` and the `volume` the file already gives it. Sonatina,
+for one, retunes some notes by 20 cents, sets their level by up to 4 dB and
+fades some in over 0.2 to 0.4 s; measured raw, those notes came out 45 cents
+off, 5 dB apart and 60 to 130 ms late.
+
 `inspect.js` reads the layout from the file (keys, velocity layers and forces
 faded by a controller, takes, legato, release sounds, key switches, loops) and
 measures a few recordings spread over the range: a recorded vibrato (how wide,

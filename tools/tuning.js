@@ -31,7 +31,7 @@ export function tuningTable(file) {
     if (!region.sample || seen.has(region.sample)) continue;
     seen.add(region.sample);
     const key = region.pitch_keycenter ?? 60;
-    const expected = 440 * 2 ** ((key - 69 + (region.tune ?? 0) / 100) / 12);
+    const expected = 440 * 2 ** ((key - 69 - (region.tune ?? 0) / 100) / 12);
     let pitch;
     try { pitch = medianPitch(decode(join(dirname(file), region.sample)), expected); } catch { pitch = null; }
     if (!pitch || pitch.clarity < 0.8) { unclear++; continue; }

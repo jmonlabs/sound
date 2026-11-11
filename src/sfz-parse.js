@@ -103,6 +103,7 @@ export function parseSfz(text, { include } = {}) {
   let global = {};
   let master = {};
   let group = {};
+  let groups = 0; // each <group> header gets a number, `group_index` in its regions: two groups may play the same recording
   let region = null;
   let current = null;
   const regions = [];
@@ -120,8 +121,8 @@ export function parseSfz(text, { include } = {}) {
         case "control": current = control; break;
         case "global": global = {}; master = {}; group = {}; current = global; break;
         case "master": master = {}; group = {}; current = master; break;
-        case "group": group = {}; current = group; break;
-        case "region": region = { ...global, ...master, ...group }; current = region; break;
+        case "group": groups++; group = {}; current = group; break;
+        case "region": region = { ...global, ...master, ...group, group_index: groups }; current = region; break;
         case "curve": current = {}; curves.push(current); break;
         default: current = null; // <effect>, <midi>: not read
       }

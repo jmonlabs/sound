@@ -35,7 +35,7 @@ test("a region inherits from its group, master and global, and `key` is a single
   ].join("\r\n"));
   assert.deepEqual(control, { default_path: "..\\libs\\", set_cc1: 64 });
   assert.deepEqual(regions[0], {
-    volume: -6, ampeg_release: 1.6, sample: "../libs/Solo Violin/4_C#.wav",
+    volume: -6, ampeg_release: 1.6, group_index: 1, sample: "../libs/Solo Violin/4_C#.wav",
     key: 61, lokey: 61, hikey: 61, pitch_keycenter: 61,
   });
   assert.equal(regions[1].volume, -3, "a region's own opcode wins");
@@ -444,4 +444,17 @@ test("a muffled recording is avoided: its keys go to the nearest recording of th
   assert.deepEqual(kept.map((r) => r.sample), ["C.wav", "E.wav", "legato_C_D.wav"]);
   assert.deepEqual([kept[0].lokey, kept[0].hikey], [60, 63], "the nearest (C, then E by order) takes D's keys");
   assert.deepEqual(avoidRecordings(regions, []), regions);
+});
+
+test("an avoided recording's keys stay in its group, when two groups play the same recordings", async () => {
+  const { avoidRecordings } = await import("../src/sfz.js");
+  const { parseSfz } = await import("../src/sfz-parse.js");
+  const notes = "<region> sample=C.wav lokey=60 hikey=61 pitch_keycenter=60 <region> sample=D.wav lokey=62 hikey=63 pitch_keycenter=62";
+  // a marcato: the held note, and an accent over it from the same recordings
+  const { regions } = parseSfz(`<group> loop_mode=loop_continuous ${notes} <group> loop_mode=one_shot ampeg_sustain=0 ${notes}`);
+  const kept = avoidRecordings(regions, ["D.wav"]);
+  for (const group of [1, 2]) {
+    const c = kept.find((r) => r.group_index === group);
+    assert.deepEqual([c.lokey, c.hikey], [60, 63], `group ${group} still plays D's keys`);
+  }
 });

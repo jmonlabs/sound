@@ -30,6 +30,8 @@ const samples = process.env.SAMPLES ?? "/Volumes/instruments/jmon";
 const onDisk = (url) => (url.startsWith("/__files/samples/") ? join(samples, url.slice("/__files/samples/".length)) : url.startsWith("/__files/") ? join(jmon, url.slice("/__files/".length)) : url);
 const asUrl = (path) => `/__files/${relative(jmon, path)}`;
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+// The level the file gives a region to even it with its neighbours (dB): it plays at its recording's level plus this. Not `group_volume`: that one belongs to the way of playing (a louder accent).
+const written = (r) => (r.volume ?? 0) + (r.amplitude !== undefined ? 20 * Math.log10(r.amplitude / 100) : 0);
 const isPlain = (r) => ["attack", "first"].includes(r.trigger ?? "attack") && r.sw_previous === undefined && r.sample;
 
 /** JSON with tables of numbers on one line, so the ison stays readable. */
@@ -50,9 +52,11 @@ const ison = JSON.parse(readFileSync(file, "utf8"));
 const here = dirname(resolve(file));
 const tuningPath = join(here, "tuning.json"), gainPath = join(here, "levels.json");
 
-// Every source's regions, and every recording to measure once: its expected pitch, and the offsets it is played from.
+// Every source's regions, and every recording to measure once: its expected pitch, and the ways it is played
+// (where it starts, `offset`, and the fade-in the file gives it, `ampeg_delay` and `ampeg_attack`).
 const sources = [];
-const wanted = new Map(); // disk path → { expected, offsets }
+const wanted = new Map(); // disk path → { expected, starts }
+const startOf = (r) => `${r.offset ?? 0}|${r.ampeg_delay ?? 0}|${r.ampeg_attack ?? 0}`;
 for (const [name, source] of Object.entries(ison.sources ?? {})) {
   const url = source.sfz ?? source.dspreset;
   if (typeof url !== "string") continue;
@@ -63,18 +67,25 @@ for (const [name, source] of Object.entries(ison.sources ?? {})) {
   for (const r of regions) {
     if (!r.sample) continue;
     const disk = join(dirname(path), r.sample);
-    const entry = wanted.get(disk) ?? { expected: 440 * 2 ** (((r.pitch_keycenter ?? 60) - 69 + (r.tune ?? 0) / 100) / 12), offsets: new Set() };
-    entry.offsets.add(r.offset ?? 0);
+    const entry = wanted.get(disk) ?? { expected: 440 * 2 ** (((r.pitch_keycenter ?? 60) - 69 - (r.tune ?? 0) / 100) / 12), starts: new Set() };
+    entry.starts.add(startOf(r));
     wanted.set(disk, entry);
   }
 }
 console.log(`${wanted.size} recordings to measure…`);
 const measured = new Map();
-await eachAtOnce([...wanted.entries()], async ([disk, { expected, offsets }]) => {
+await eachAtOnce([...wanted.entries()], async ([disk, { expected, starts }]) => {
   let x;
   try { x = await decodeLater(disk); } catch { return; }
   const heard = {};
-  for (const offset of offsets) heard[offset] = heardAt(x, Math.round((offset * RATE) / 44100));
+  for (const start of starts) {
+    // the recording as the player starts it: from its offset, silent for the delay, then fading in (linearly) over the attack
+    const [offset, delay, attack] = start.split("|").map(Number);
+    const from = Math.round((offset * RATE) / 44100), quiet = Math.round(delay * RATE), rise = Math.round(attack * RATE);
+    const played = new Float32Array(Math.max(0, x.length - from + quiet));
+    for (let i = 0; i < played.length - quiet; i++) played[quiet + i] = x[from + i] * (rise > 0 ? Math.min(1, i / rise) : 1);
+    heard[start] = heardAt(played);
+  }
   measured.set(disk, { pitch: medianPitch(x, expected), colour: colourOf(x), heard });
 });
 
@@ -97,17 +108,17 @@ for (const { name, source, path, regions } of sources) {
   const top = Math.max(0, ...plain.map((r) => r.hivel ?? 127));
   const byKey = new Map();
   for (const r of plain.filter((r) => (r.hivel ?? 127) === top)) if (!byKey.has(r.pitch_keycenter ?? 60) && at(r)?.colour) byKey.set(r.pitch_keycenter ?? 60, r);
-  const list = [...byKey.entries()].sort((a, b) => a[0] - b[0]).map(([, r]) => ({ sample: r.sample, colour: at(r).colour }));
+  const list = [...byKey.entries()].sort((a, b) => a[0] - b[0]).map(([, r]) => ({ sample: r.sample, colour: at(r).colour, level: at(r).colour.level + written(r) }));
   const avoid = [], dull = [];
   list.forEach((r, i) => {
     const near = list.filter((_, j) => j !== i && Math.abs(j - i) <= 2).map((n) => n.colour.bright);
     if (near.length >= 2 && r.colour.bright < median(near) - 5) { avoid.push(r.sample); dull.push(`${r.sample.split("/").pop()} (${(r.colour.bright - median(near)).toFixed(1)} dB above 3 kHz)`); }
   });
   const kept = list.filter((r) => !avoid.includes(r.sample));
-  const level = median(kept.map((r) => r.colour.level));
+  const level = median(kept.map((r) => r.level));
   let levelled = 0;
   for (const r of kept) {
-    const g = Math.round((level - r.colour.level) * 10) / 10;
+    const g = Math.round((level - r.level) * 10) / 10;
     if (Math.abs(g) >= 1) { gains[r.sample] = Math.max(-6, Math.min(6, g)); levelled++; }
   }
   source.gain = asUrl(gainPath);
@@ -116,11 +127,19 @@ for (const { name, source, path, regions } of sources) {
   const speech = {};
   const playing = avoidRecordings(regions.map((r) => ({ ...r })), avoid).filter(isPlain);
   const loud = Math.max(0, ...playing.map((r) => r.hivel ?? 127));
+  // Layers that sound together (a marcato's accent over its held note) are heard with the first of them;
+  // takes that play in turn (round robins) each need their time, and the key gets the longest.
+  const byTake = {}; // key → take → seconds
   for (const r of playing.filter((r) => (r.hivel ?? 127) === loud)) {
-    const heard = at(r)?.heard?.[r.offset ?? 0];
+    const heard = at(r)?.heard?.[startOf(r)];
     if (heard === null || heard === undefined) continue;
-    for (let k = r.lokey ?? 0; k <= Math.min(127, r.hikey ?? 127); k++) speech[k] = Math.max(speech[k] ?? 0, heard);
+    const take = `${r.seq_position ?? ""}|${r.lorand ?? ""}`;
+    for (let k = r.lokey ?? 0; k <= Math.min(127, r.hikey ?? 127); k++) {
+      byTake[k] ??= {};
+      byTake[k][take] = Math.min(byTake[k][take] ?? Infinity, heard);
+    }
   }
+  for (const [k, takes] of Object.entries(byTake)) speech[k] = Math.max(...Object.values(takes));
   for (const [modeName, mode] of Object.entries(ison.modes ?? {})) if ((mode.source ?? Object.keys(ison.sources)[0]) === name) mode.speech = speech;
   const values = Object.values(speech);
   console.log(`${name}: ${corrected} recordings retuned, ${unclear} without a clear pitch${doubtful.length ? `, left alone (over 30 cents, check by ear): ${doubtful.join(", ")}` : ""}; ${levelled} levelled${dull.length ? `; avoided (their keys go to the nearest recording): ${dull.join(", ")}` : ""}; heard after ${Math.round(Math.min(...values) * 1000)} to ${Math.round(Math.max(...values) * 1000)} ms`);

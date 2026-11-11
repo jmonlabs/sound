@@ -95,7 +95,7 @@ export function inspect(file) {
     if (!existsSync(path)) continue;
     let x;
     try { x = decode(path); } catch { continue; }
-    const expected = 440 * 2 ** (((r.pitch_keycenter ?? 60) - 69 + (r.tune ?? 0) / 100) / 12);
+    const expected = 440 * 2 ** (((r.pitch_keycenter ?? 60) - 69 - (r.tune ?? 0) / 100) / 12);
     const pitch = medianPitch(x, expected);
     // More than 50 cents from its note is a noise, a chord or a bad measurement, not a tuning.
     if (pitch && pitch.clarity >= 0.8 && Math.abs(pitch.cents) <= 50) sound.tuning.push(Math.round(pitch.cents));

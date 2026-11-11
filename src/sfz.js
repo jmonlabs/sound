@@ -68,7 +68,9 @@ const RELEASE_FLOOR = 0.001;
 export function avoidRecordings(regions, avoid = []) {
   if (!avoid?.length) return regions;
   const out = regions.filter((r) => !avoid.includes(r.sample));
-  const kind = (r) => `${r.trigger ?? "attack"}|${r.lovel ?? 1}|${r.hivel ?? 127}|${r.sw_previous ?? ""}|${r.seq_position ?? ""}|${r.lorand ?? ""}`;
+  // the nearest recording of the same group, playing the same way: another group may use the same
+  // recordings for something else (a marcato's accent over its held note)
+  const kind = (r) => `${r.group_index ?? 0}|${r.trigger ?? "attack"}|${r.lovel ?? 1}|${r.hivel ?? 127}|${r.sw_previous ?? ""}|${r.seq_position ?? ""}|${r.lorand ?? ""}`;
   for (const gone of regions.filter((r) => avoid.includes(r.sample) && r.sw_previous === undefined)) {
     const same = out.filter((r) => kind(r) === kind(gone) && r.sw_previous === undefined);
     if (!same.length) continue;

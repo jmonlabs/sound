@@ -28,7 +28,7 @@ export async function compare(file) {
   const list = [...byKey.entries()].sort((a, b) => a[0] - b[0]);
   const rows = (await eachAtOnce(list, async ([key, r]) => {
     let x; try { x = await decodeLater(join(dirname(file), r.sample)); } catch { return null; }
-    const expected = 440 * 2 ** ((key - 69 + (r.tune ?? 0) / 100) / 12);
+    const expected = 440 * 2 ** ((key - 69 - (r.tune ?? 0) / 100) / 12);
     return { key, seconds: x.length / RATE, pitch: medianPitch(x, expected), vibrato: vibratoOf(x, expected), colour: colourOf(x), heard: heardAt(x, Math.round(((r.offset ?? 0) * RATE) / 44100)) };
   })).filter(Boolean);
   const tuned = rows.filter((r) => r.pitch && r.pitch.clarity >= 0.8 && Math.abs(r.pitch.cents) <= 50).map((r) => r.pitch.cents);
