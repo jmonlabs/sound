@@ -280,6 +280,7 @@ class IsonInstrument {
     this.nodes = []; // every source node, once
     this.byMode = {}; // mode name → node
     this.sounding = new Map(); // MIDI note → the node playing it
+    this.layered = new Map(); // MIDI note → the layers each key of a layered mode started, oldest first
 
     const sources = ison.sources ?? {};
     const sourceNames = Object.keys(sources);
@@ -464,6 +465,7 @@ class IsonInstrument {
     const own = {};
     for (const control of Object.values(this.ison.controls ?? {})) {
       if (control?.velocity !== true || typeof control.cc !== "number") continue;
+      if (this.taken?.has(control.cc)) continue; // a hand on the control: it has it now
       // The velocity, 0 to 1, within the control's `range`: [0.3, 1] keeps the softest notes audible.
       const [low, high] = Array.isArray(control.range) && control.range.length === 2 ? control.range : [0, 1];
       own[control.cc] = Math.max(0, Math.min(1, low + Math.max(0, Math.min(1, velocity)) * (high - low)));
@@ -479,7 +481,44 @@ class IsonInstrument {
     return own ? { ...options, controllers: { ...(options?.controllers ?? {}), ...own } } : options;
   }
 
+  /** The layers of a mode, if it is made of layers: the note's own, or the instrument's. */
+  layersOf(variant) {
+    const layers = this.ison.modes?.[variant ?? defaultMode(this.ison)]?.layers;
+    return Array.isArray(layers) && layers.length > 0 ? layers : null;
+  }
+
   triggerAttack(notes, time, velocity = 1, duration, options) {
+    const layers = this.layersOf(options?.variant);
+    if (layers) return this.attackLayers(notes, time, velocity, duration, options, layers);
+    return this.attackOne(notes, time, velocity, duration, options);
+  }
+
+  /**
+   * A note in a mode made of layers, played as it comes (from a keyboard):
+   * every layer at once, each in its mode, `transpose` semitones away, `delay`
+   * seconds later, `db` louder or softer. A piece's notes come already split
+   * by performIson, with its `spread` too.
+   */
+  attackLayers(notes, time, velocity, duration, options, layers) {
+    const at = this.Tone.Time(time ?? this.Tone.now()).toSeconds();
+    for (const note of [].concat(notes)) {
+      const midi = this.midiOf(note);
+      const started = [];
+      for (const layer of layers) {
+        if (!layer?.mode || !this.byMode[layer.mode]) continue;
+        const name = this.Tone.Frequency(midi + (layer.transpose ?? 0), "midi").toNote();
+        const start = at + (layer.delay ?? 0);
+        const loudness = Math.min(1, velocity * Math.pow(10, (layer.db ?? 0) / 20));
+        this.attackOne(name, start, loudness, duration, { ...options, variant: layer.mode });
+        started.push({ name, start });
+      }
+      if (!this.layered.has(midi)) this.layered.set(midi, []);
+      this.layered.get(midi).push(started);
+    }
+    return this;
+  }
+
+  attackOne(notes, time, velocity = 1, duration, options) {
     const node = this.nodeFor(options?.variant);
     if (!node) return this;
     const own = this.velocityControls(node, velocity, time);
@@ -493,6 +532,21 @@ class IsonInstrument {
 
   triggerRelease(notes, time) {
     for (const note of [].concat(notes)) {
+      const keys = this.layered.get(this.midiOf(note));
+      if (keys?.length) {
+        // The layers that key started; one that has not begun yet ends just after it does.
+        const at = this.Tone.Time(time ?? this.Tone.now()).toSeconds();
+        for (const layer of keys.shift()) this.releaseOne(layer.name, Math.max(at, layer.start + 0.05));
+        if (!keys.length) this.layered.delete(this.midiOf(note));
+      } else {
+        this.releaseOne(note, time);
+      }
+    }
+    return this;
+  }
+
+  releaseOne(notes, time) {
+    for (const note of [].concat(notes)) {
       const midi = this.midiOf(note);
       const node = this.nodeOf(midi);
       if (node) this.isMono(node) ? node.triggerRelease(time) : node.triggerRelease?.(note, time);
@@ -502,6 +556,11 @@ class IsonInstrument {
   }
 
   triggerAttackRelease(notes, duration, time, velocity = 1, options) {
+    if (this.layersOf(options?.variant)) {
+      const at = this.Tone.Time(time ?? this.Tone.now()).toSeconds();
+      this.triggerAttack(notes, at, velocity, duration, options);
+      return this.triggerRelease(notes, at + this.Tone.Time(duration).toSeconds());
+    }
     const node = this.nodeFor(options?.variant);
     const own = node ? this.velocityControls(node, velocity, time) : null;
     node?.triggerAttackRelease(notes, duration, time, this.velocityOf(velocity), this.withOwn(options, own));
@@ -550,6 +609,15 @@ class IsonInstrument {
   }
 
   controllerChange(controller, value, time) {
+    // A control that follows the velocity is the player's once moved (a mod
+    // wheel): the next notes start where it is, and the notes sounding,
+    // which took it from their velocity, follow it from now on. A piece that
+    // writes the control has this already (performPiece).
+    const followsVelocity = Object.values(this.ison.controls ?? {}).some((control) => control?.velocity === true && control.cc === controller);
+    if (followsVelocity && !this.taken?.has(controller)) {
+      (this.taken ??= new Set()).add(controller);
+      for (const node of this.nodes) for (const voice of node.voices ?? []) if (voice?.own) delete voice.own[controller];
+    }
     // A control that turns a mode's level: the level follows, 0 to 1.
     for (const control of Object.values(this.ison.controls ?? {})) {
       if (control?.cc !== controller || !control.mode) continue;
@@ -575,6 +643,7 @@ class IsonInstrument {
   releaseAll() {
     for (const node of this.nodes) node.releaseAll?.();
     this.sounding.clear();
+    this.layered.clear();
     return this;
   }
 

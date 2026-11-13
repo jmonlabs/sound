@@ -344,3 +344,38 @@ test("an instrument with its own recorded attack does not fade in a bow shape fr
   assert.equal(note.dynamics[0].value, 0.85, "starts where the drawn attack would have arrived");
   assert.deepEqual(note.dynamics.slice(1), shape.slice(1), "the swell and the end are kept");
 });
+
+test("a key in a mode of layers plays every layer, and its release ends them all", () => {
+  const Tone = fakeTone();
+  const toMidi = Tone.Frequency;
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  Tone.Frequency = (value, unit) => unit === "midi" ? { toNote: () => names[value % 12] + (Math.floor(value / 12) - 1) } : toMidi(value);
+  const ether = {
+    format: "ison", version: "1.0", name: "e",
+    sources: { fm: { type: "FMSynth" } },
+    modes: { both: { layers: [{ mode: "low", transpose: -12 }, { mode: "high", delay: 0.5, db: -6 }] }, low: { source: "fm" }, high: { source: "fm" } },
+  };
+  const { node } = sound.create(ether, Tone);
+  node.triggerAttack("D4", 1, 1);
+  node.triggerRelease("D4", 1.2);
+  assert.deepEqual(node.byMode.low.played, [["on", "D3", 1, 1], ["off", 1.2]]);
+  const high = node.byMode.high.played;
+  assert.deepEqual([high[0][1], high[0][2], Math.round(high[0][3] * 100) / 100], ["D4", 1.5, 0.5]);
+  assert.deepEqual(high[1], ["off", 1.55], "a layer that had not begun ends just after it does");
+});
+
+test("a control that follows the velocity is the player's once moved", () => {
+  const Tone = fakeTone();
+  const violin = {
+    format: "ison", version: "1.0", name: "v",
+    sources: { fm: { type: "FMSynth" } },
+    controls: { dynamics: { cc: 1, velocity: true, range: [0.3, 1] } },
+  };
+  const { node } = sound.create(violin, Tone);
+  const sampler = { isSfz: true, voices: [{ own: { 1: 100 } }] };
+  assert.deepEqual(node.velocityControls(sampler, 1), { 1: 1 }, "before: the note's velocity sets it");
+  node.nodes.push(sampler);
+  node.controllerChange(1, 0.2, 0);
+  assert.equal(node.velocityControls(sampler, 1), null, "after: the wheel has it");
+  assert.deepEqual(sampler.voices[0].own, {}, "and a note already sounding follows the wheel");
+});
